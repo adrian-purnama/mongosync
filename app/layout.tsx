@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MongoSync Local",
-  description: "Local-first MongoDB collection copy utility for development.",
+  title: "MongoSync",
+  description: "MongoDB collection copy utility for development.",
   icons: {
     icon: "/assets/full logo.png",
     shortcut: "/assets/full logo.png",

@@ -71,7 +71,7 @@ async function waitForServerReady() {
     await new Promise((resolve) => setTimeout(resolve, SERVER_POLL_INTERVAL_MS));
   }
 
-  throw new Error("Timed out while starting the local MongoSync server.");
+  throw new Error("Timed out while starting the MongoSync server.");
 }
 
 async function startNextServer() {
@@ -164,7 +164,7 @@ async function confirmQuitIfNeeded() {
       defaultId: 0,
       cancelId: 0,
       title: "Unable to verify running jobs",
-      message: "MongoSync Local could not verify whether a copy job is running.",
+      message: "MongoSync could not verify whether a copy job is running.",
       detail:
         "Quitting now may stop an active copy. Saved job info and logs will remain on disk, and the next app launch will show interrupted work if the process was terminated mid-copy.",
       noLink: true,
@@ -204,7 +204,8 @@ function createMainWindow() {
     minWidth: 1180,
     minHeight: 800,
     autoHideMenuBar: true,
-    title: "MongoSync Local",
+    title: "MongoSync",
+    icon: path.join(getAppRoot(), "public", "assets", "full logo.png"),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -237,8 +238,8 @@ app.whenReady().then(() => {
   void bootstrap().catch(async (error) => {
     await dialog.showMessageBox({
       type: "error",
-      title: "MongoSync Local",
-      message: "Failed to start MongoSync Local.",
+      title: "MongoSync",
+      message: "Failed to start MongoSync.",
       detail: error instanceof Error ? error.message : "Unknown startup error.",
     });
 

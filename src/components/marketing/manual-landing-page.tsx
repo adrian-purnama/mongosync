@@ -11,7 +11,7 @@ export function ManualLandingPage() {
           <div className="flex items-center gap-3">
             <Image
               src="/assets/logo only.png"
-              alt="MongoSync Local logo"
+              alt="MongoSync logo"
               width={72}
               height={72}
               className="w-20 shrink-0 object-contain"
@@ -61,9 +61,9 @@ export function ManualLandingPage() {
               machine.
             </h2>
             <p className="max-w-2xl text-base leading-7 text-zinc-600">
-              MongoSync Local is a local-first tool. The browser UI is the control
-              panel. The actual MongoDB reads, writes, encryption, and copy jobs run in
-              the local server process on your machine.
+              MongoSync is a local-first tool. The browser UI is the control panel. The
+              actual MongoDB reads, writes, encryption, and copy jobs run in the local
+              server process on your machine.
             </p>
             <div className="flex flex-wrap gap-3">
               <Link

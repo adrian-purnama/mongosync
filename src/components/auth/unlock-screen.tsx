@@ -21,7 +21,7 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
   const [resetConfirmText, setResetConfirmText] = useState("");
 
   const heading = useMemo(
-    () => (hasUser ? "Unlock MongoSync Local" : "Create your master password"),
+    () => (hasUser ? "Unlock MongoSync" : "Create your master password"),
     [hasUser],
   );
 
@@ -87,7 +87,7 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
             />
           <Image
             src="/assets/name only.png"
-            alt="MongoSync Local"
+            alt="MongoSync"
             width={260}
             height={52}
             className="h-auto w-20"

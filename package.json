@@ -2,7 +2,7 @@
   "name": "mongocopy",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first MongoDB copy utility for Windows desktop.",
+  "description": "MongoDB copy utility for Windows desktop.",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,7 @@
     "start": "next start",
     "electron:dev": "electron .",
     "electron:start": "electron .",
-    "dist:win": "npm run build && electron-builder --win portable --config.win.signAndEditExecutable=false",
+    "dist:win": "npm run build && electron-builder --win nsis",
     "lint": "eslint",
     "test": "vitest run"
   },
@@ -38,8 +38,9 @@
     "vitest": "^4.1.2"
   },
   "build": {
-    "appId": "com.mongosync.local",
-    "productName": "MongoSync Local",
+    "appId": "com.mongosync",
+    "productName": "MongoSync",
+    "icon": "build/icon.ico",
     "directories": {
       "output": "dist-electron"
     },
@@ -54,15 +55,20 @@
       "!**/.next/cache/**"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
-        "portable"
+        "nsis"
       ],
-      "artifactName": "MongoSync-Local-${version}.${ext}",
-      "signAndEditExecutable": false
+      "artifactName": "MongoSync-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "MongoSync",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     }
   }
 }
