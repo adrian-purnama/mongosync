@@ -50,6 +50,7 @@ export async function startExportJob(input: ExportDatabaseInput) {
     sourceCollections,
     artifactFileName: `${sanitizeFileName(input.sourceDatabase)}.zip`,
   });
+  await addCopyJobLog(jobId, "info", "Queued. Waiting to start the export job.");
 
   void runExportJob({
     ...input,
@@ -112,6 +113,7 @@ async function runExportJob(
   },
 ) {
   const sourceUri = decryptConnectionUrl(input.sourceConnection, input.password);
+  await addCopyJobLog(input.jobId, "info", "Establishing source connection...");
   const client = await createMongoClient(sourceUri);
 
   try {

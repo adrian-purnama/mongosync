@@ -30,6 +30,9 @@ export function ProgressPanel({ job, error, onCancel, isCancelling = false }: Pr
     job.totalDocuments && job.totalDocuments > 0
       ? Math.min(100, Math.round((job.processedDocuments / job.totalDocuments) * 100))
       : 0;
+  const latestLog = job.logs.at(-1) ?? null;
+  const currentActivity = getCurrentActivity(job);
+  const statusTone = getStatusTone(job.status);
 
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -44,9 +47,32 @@ export function ProgressPanel({ job, error, onCancel, isCancelling = false }: Pr
             {job.lastPersistedAt ? ` | Saved ${new Date(job.lastPersistedAt).toLocaleString()}` : ""}
           </p>
         </div>
-        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${statusTone.badge}`}
+        >
           {job.status}
         </span>
+      </div>
+
+      <div className={`mb-4 rounded-lg border px-4 py-3 ${statusTone.panel}`}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide opacity-75">
+              Current activity
+            </p>
+            <p className="mt-1 text-sm font-medium">{currentActivity}</p>
+          </div>
+          {latestLog ? (
+            <p className="shrink-0 text-xs opacity-75">
+              {new Date(latestLog.timestamp).toLocaleTimeString()}
+            </p>
+          ) : null}
+        </div>
+        {job.status === "queued" ? (
+          <p className="mt-2 text-xs opacity-75">
+            The app has accepted your job and will start it as soon as the worker begins processing.
+          </p>
+        ) : null}
       </div>
 
       <div className="mb-2 h-3 w-full overflow-hidden rounded-full bg-zinc-200">
@@ -126,4 +152,61 @@ function getJobSummary(job: CopyJob) {
   }
 
   return `${job.sourceDatabase}.${job.sourceCollection} to ${job.targetDatabase}.${job.targetCollection}`;
+}
+
+function getCurrentActivity(job: CopyJob) {
+  const latestLog = job.logs.at(-1);
+
+  if (latestLog) {
+    return latestLog.message;
+  }
+
+  switch (job.status) {
+    case "queued":
+      return "Waiting in the local queue to start.";
+    case "running":
+      return "Job is running.";
+    case "completed":
+      return job.kind === "export" ? "Export finished successfully." : "Copy finished successfully.";
+    case "cancelled":
+      return "Job cancelled.";
+    case "failed":
+      return job.error ?? "Job failed.";
+    case "interrupted":
+      return "Job was interrupted before completion.";
+    default:
+      return "Preparing job details.";
+  }
+}
+
+function getStatusTone(status: CopyJob["status"]) {
+  switch (status) {
+    case "queued":
+      return {
+        badge: "bg-amber-100 text-amber-800",
+        panel: "border-amber-200 bg-amber-50 text-amber-950",
+      };
+    case "running":
+      return {
+        badge: "bg-sky-100 text-sky-800",
+        panel: "border-sky-200 bg-sky-50 text-sky-950",
+      };
+    case "completed":
+      return {
+        badge: "bg-emerald-100 text-emerald-800",
+        panel: "border-emerald-200 bg-emerald-50 text-emerald-950",
+      };
+    case "failed":
+    case "cancelled":
+    case "interrupted":
+      return {
+        badge: "bg-red-100 text-red-800",
+        panel: "border-red-200 bg-red-50 text-red-950",
+      };
+    default:
+      return {
+        badge: "bg-zinc-100 text-zinc-700",
+        panel: "border-zinc-200 bg-zinc-50 text-zinc-950",
+      };
+  }
 }

@@ -88,6 +88,7 @@ export async function startCopyJob(input: StartCopyJobInput) {
     sourceCollections,
     targetCollections,
   });
+  await addCopyJobLog(jobId, "info", "Queued. Waiting to start the copy job.");
 
   void runCopyJob({
     ...input,
@@ -113,6 +114,7 @@ async function runCopyJob(
   const sourceUri = decryptConnectionUrl(input.sourceConnection, input.password);
   const targetUri = decryptConnectionUrl(input.targetConnection, input.password);
 
+  await addCopyJobLog(input.jobId, "info", "Establishing source and target connections...");
   const sourceClient = await createMongoClient(sourceUri);
   const targetClient = await createMongoClient(targetUri);
 

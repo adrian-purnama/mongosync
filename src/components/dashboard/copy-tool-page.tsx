@@ -30,6 +30,7 @@ export function CopyToolPage() {
   const [targetConnectionId, setTargetConnectionId] = useState("");
   const [sourceDatabase, setSourceDatabase] = useState("");
   const [targetDatabase, setTargetDatabase] = useState("");
+  const [useNewTargetDatabase, setUseNewTargetDatabase] = useState(false);
   const [sourceCollections, setSourceCollections] = useState<string[]>([]);
   const [action, setAction] = useState<ToolAction>("copy");
   const [mode, setMode] = useState<CopyMode>("override");
@@ -95,13 +96,14 @@ export function CopyToolPage() {
     filteredConnections.find((connection) => connection.id === sourceConnectionId) ?? null;
   const requiresLockedTargetConfirmation =
     action === "copy" && Boolean(selectedTargetConnection?.locked);
+  const normalizedTargetDatabase = targetDatabase.trim();
   const canProceedFromStep1 =
     Boolean(selectedOrganizationId) &&
     Boolean(sourceConnectionId) &&
     (action === "export" || Boolean(targetConnectionId));
   const canProceedFromStep2 =
     Boolean(sourceDatabase) &&
-    (action === "export" || Boolean(targetDatabase)) &&
+    (action === "export" || Boolean(normalizedTargetDatabase)) &&
     (action === "export" || sourceCollections.length > 0);
   const canSubmit =
     !isSubmitting &&
@@ -110,7 +112,7 @@ export function CopyToolPage() {
     Boolean(sourceDatabase) &&
     (action === "export" ||
       (Boolean(targetConnectionId) &&
-        Boolean(targetDatabase) &&
+        Boolean(normalizedTargetDatabase) &&
         sourceCollections.length > 0 &&
         (mode !== "new" || sourceCollections.length === 1)));
   const stepLabels =
@@ -161,6 +163,7 @@ export function CopyToolPage() {
     setTargetDatabases([]);
     setSourceCollections([]);
     setCollections([]);
+    setUseNewTargetDatabase(false);
     setLockedTargetConfirmation("");
     setShowLockedTargetModal(false);
   }, [selectedOrganizationId]);
@@ -175,6 +178,7 @@ export function CopyToolPage() {
   useEffect(() => {
     setLockedTargetConfirmation("");
     setShowLockedTargetModal(false);
+    setUseNewTargetDatabase(false);
   }, [targetConnectionId]);
 
   useEffect(() => {
@@ -243,9 +247,13 @@ export function CopyToolPage() {
           "Failed to load databases.",
         );
         setTargetDatabases(nextDatabases);
-        setTargetDatabase((current) =>
-          nextDatabases.includes(current) ? current : (nextDatabases[0] ?? ""),
-        );
+        setTargetDatabase((current) => {
+          if (useNewTargetDatabase) {
+            return current;
+          }
+
+          return nextDatabases.includes(current) ? current : (nextDatabases[0] ?? "");
+        });
       } catch (databaseError) {
         setError(
           databaseError instanceof Error
@@ -256,7 +264,7 @@ export function CopyToolPage() {
         setIsLoadingTargetDatabases(false);
       }
     })();
-  }, [targetConnectionId]);
+  }, [targetConnectionId, useNewTargetDatabase]);
 
   useEffect(() => {
     if (!sourceConnectionId) {
@@ -308,7 +316,7 @@ export function CopyToolPage() {
           sourceConnectionId,
           targetConnectionId,
           sourceDatabase,
-          targetDatabase,
+          targetDatabase: normalizedTargetDatabase,
           sourceCollections,
           mode,
           newCollectionName: mode === "new" ? newCollectionName : undefined,
@@ -361,9 +369,7 @@ export function CopyToolPage() {
     }
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function executeCurrentAction() {
     if (requiresLockedTargetConfirmation) {
       setShowLockedTargetModal(true);
       return;
@@ -481,7 +487,12 @@ export function CopyToolPage() {
           )}
         </div>
 
-        <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
+        <form
+          className="mt-6 grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+          }}
+        >
           {currentStep === 1 ? (
             <>
               <SearchableDropdown
@@ -540,21 +551,60 @@ export function CopyToolPage() {
 
               {action === "copy" ? (
                 <>
-                  <SearchableDropdown
-                    label="Target database"
-                    value={targetDatabase}
-                    options={targetDatabaseOptions}
-                    placeholder={
-                      isLoadingTargetDatabases
-                        ? "Loading target databases..."
-                        : "Select target database"
-                    }
-                    onChange={setTargetDatabase}
-                    disabled={!targetConnectionId}
-                  />
+                  <label className="flex items-center gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={useNewTargetDatabase}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setUseNewTargetDatabase(checked);
+
+                        if (!checked) {
+                          setTargetDatabase((current) =>
+                            targetDatabases.includes(current) ? current : (targetDatabases[0] ?? ""),
+                          );
+                        } else {
+                          setTargetDatabase("");
+                        }
+                      }}
+                      disabled={!targetConnectionId}
+                    />
+                    <span>Use a new target database name instead of selecting an existing one</span>
+                  </label>
+
+                  {useNewTargetDatabase ? (
+                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
+                      New target database name
+                      <input
+                        value={targetDatabase}
+                        onChange={(event) => setTargetDatabase(event.target.value)}
+                        placeholder="Enter new target database name"
+                        className="rounded-md border border-zinc-300 px-3 py-2"
+                        disabled={!targetConnectionId}
+                      />
+                    </label>
+                  ) : (
+                    <SearchableDropdown
+                      label="Target database"
+                      value={targetDatabase}
+                      options={targetDatabaseOptions}
+                      placeholder={
+                        isLoadingTargetDatabases
+                          ? "Loading target databases..."
+                          : "Select target database"
+                      }
+                      onChange={setTargetDatabase}
+                      disabled={!targetConnectionId}
+                    />
+                  )}
                   {isLoadingTargetDatabases ? (
                     <p className="text-sm text-zinc-500">
                       Loading target databases from `{selectedTargetConnection?.name ?? "selected connection"}`...
+                    </p>
+                  ) : null}
+                  {!useNewTargetDatabase && !isLoadingTargetDatabases && targetDatabases.length === 0 ? (
+                    <p className="text-sm text-zinc-500">
+                      No databases were found on the target connection. Turn on the checkbox above to type a new database name.
                     </p>
                   ) : null}
                 </>
@@ -662,7 +712,7 @@ export function CopyToolPage() {
                       </span>
                       <span>{selectedTargetConnection?.name ?? "Not selected"}</span>
                       <span className="text-zinc-500">
-                        {targetDatabase || "No database selected"}
+                        {normalizedTargetDatabase || "No database selected"}
                       </span>
                     </div>
                   ) : null}
@@ -725,8 +775,11 @@ export function CopyToolPage() {
                 </button>
               ) : (
                 <button
-                  type="submit"
+                  type="button"
                   disabled={!canSubmit}
+                  onClick={() => {
+                    void executeCurrentAction();
+                  }}
                   className={
                     action === "copy"
                       ? "rounded-md bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
