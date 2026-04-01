@@ -7,6 +7,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -63,9 +64,33 @@ export async function appendTextFile(filePath: string, value: string) {
 
 export async function writeTextFileAtomically(filePath: string, value: string) {
   await ensureDirectory(path.dirname(filePath));
-  const tempPath = `${filePath}.${Date.now()}.tmp`;
+  const tempPath = `${filePath}.${Date.now()}.${randomUUID()}.tmp`;
   await writeFile(tempPath, value, "utf8");
-  await rename(tempPath, filePath);
+
+  const maxAttempts = 5;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await rm(filePath, { force: true });
+      await rename(tempPath, filePath);
+      return;
+    } catch (error) {
+      if (
+        attempt === maxAttempts ||
+        !(
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error.code === "EPERM" || error.code === "EACCES")
+        )
+      ) {
+        await rm(tempPath, { force: true }).catch(() => undefined);
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, attempt * 50));
+    }
+  }
 }
 
 export async function listDirectory(directoryPath: string) {
