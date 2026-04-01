@@ -1,9 +1,7 @@
-<table>
-  <tr>
-    <td><img src="public/assets/logo%20only.png" alt="MongoSync logo" width="90" /></td>
-    <td><img src="public/assets/name%20only.png" alt="MongoSync name" width="180" /></td>
-  </tr>
-</table>
+<div style="display: flex; align-items: center; gap: 12px;">
+  <img src="public/assets/logo%20only.png" alt="MongoSync logo" width="90" />
+  <img src="public/assets/name%20only.png" alt="MongoSync name" width="180" />
+</div>
 
 # MongoSync
 
