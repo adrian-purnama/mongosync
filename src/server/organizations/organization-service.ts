@@ -71,3 +71,32 @@ export async function renameOrganization(id: string, name: string) {
 
   return renamedOrganization;
 }
+
+export async function deleteOrganization(id: string) {
+  await updateAppData((current) => {
+    const organization = current.organizations.find((entry) => entry.id === id);
+
+    if (!organization) {
+      throw new AppError("Organization not found.", 404);
+    }
+
+    const organizationConnections = current.connections.filter(
+      (connection) => connection.organizationId === id,
+    );
+
+    if (organizationConnections.some((connection) => connection.locked)) {
+      throw new AppError(
+        "This organization cannot be deleted because it contains one or more locked connections.",
+        409,
+      );
+    }
+
+    return {
+      ...current,
+      organizations: current.organizations.filter((entry) => entry.id !== id),
+      connections: current.connections.filter((connection) => connection.organizationId !== id),
+    };
+  });
+
+  return { success: true };
+}

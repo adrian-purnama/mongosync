@@ -7,6 +7,7 @@ import { OrganizationSelector } from "@/src/components/orgs/organization-selecto
 import { Modal } from "@/src/components/shared/modal";
 import { useSelectedOrganization } from "@/src/hooks/use-selected-organization";
 import type { Connection, Organization } from "@/src/types/models";
+import { readApiResponse } from "@/src/utils/api-client";
 
 export function OrganizationConnectionsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -22,11 +23,14 @@ export function OrganizationConnectionsPage() {
   const [isRenamingOrganization, setIsRenamingOrganization] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [showRenameOrganizationModal, setShowRenameOrganizationModal] = useState(false);
+  const [showDeleteOrganizationModal, setShowDeleteOrganizationModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [renameOrganizationName, setRenameOrganizationName] = useState("");
+  const [deleteOrganizationConfirmation, setDeleteOrganizationConfirmation] = useState("");
+  const [isDeletingOrganization, setIsDeletingOrganization] = useState(false);
   const organizationIds = useMemo(
     () => organizations.map((organization) => organization.id),
     [organizations],
@@ -38,25 +42,18 @@ export function OrganizationConnectionsPage() {
 
   async function loadOrganizations() {
     const response = await fetch("/api/organizations", { cache: "no-store" });
-    const payload = (await response.json()) as Organization[] | { error: string };
-
-    if (!response.ok) {
-      throw new Error("error" in payload ? payload.error : "Failed to load organizations.");
-    }
-
-    setOrganizations(payload as Organization[]);
+    const payload = await readApiResponse<Organization[]>(
+      response,
+      "Failed to load organizations.",
+    );
+    setOrganizations(payload);
   }
 
   async function loadConnections(organizationId?: string) {
     const search = organizationId ? `?organizationId=${organizationId}` : "";
     const response = await fetch(`/api/connections${search}`, { cache: "no-store" });
-    const payload = (await response.json()) as Connection[] | { error: string };
-
-    if (!response.ok) {
-      throw new Error("error" in payload ? payload.error : "Failed to load connections.");
-    }
-
-    setConnections(payload as Connection[]);
+    const payload = await readApiResponse<Connection[]>(response, "Failed to load connections.");
+    setConnections(payload);
   }
 
   useEffect(() => {
@@ -95,13 +92,10 @@ export function OrganizationConnectionsPage() {
         },
         body: JSON.stringify({ name: organizationName }),
       });
-      const payload = (await response.json()) as Organization | { error: string };
-
-      if (!response.ok) {
-        throw new Error("error" in payload ? payload.error : "Failed to create organization.");
-      }
-
-      const createdOrganization = payload as Organization;
+      const createdOrganization = await readApiResponse<Organization>(
+        response,
+        "Failed to create organization.",
+      );
       setOrganizations((current) =>
         [...current, createdOrganization].sort((a, b) => a.name.localeCompare(b.name)),
       );
@@ -130,14 +124,12 @@ export function OrganizationConnectionsPage() {
           organizationId: selectedOrganizationId,
         }),
       });
-      const payload = (await response.json()) as Connection | { error: string };
-
-      if (!response.ok) {
-        throw new Error("error" in payload ? payload.error : "Failed to create connection.");
-      }
-
+      const payload = await readApiResponse<Connection>(
+        response,
+        "Failed to create connection.",
+      );
       setConnections((current) =>
-        [...current, payload as Connection].sort((a, b) => a.name.localeCompare(b.name)),
+        [...current, payload].sort((a, b) => a.name.localeCompare(b.name)),
       );
       setConnectionName("");
       setMongoUrl("");
@@ -166,15 +158,10 @@ export function OrganizationConnectionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: renameOrganizationName }),
       });
-      const payload = (await response.json()) as Organization | { error: string };
-
-      if (!response.ok) {
-        throw new Error(
-          "error" in payload ? payload.error : "Failed to rename organization.",
-        );
-      }
-
-      const renamedOrganization = payload as Organization;
+      const renamedOrganization = await readApiResponse<Organization>(
+        response,
+        "Failed to rename organization.",
+      );
       setOrganizations((current) =>
         current
           .map((organization) =>
@@ -192,6 +179,42 @@ export function OrganizationConnectionsPage() {
       );
     } finally {
       setIsRenamingOrganization(false);
+    }
+  }
+
+  async function handleDeleteOrganization() {
+    if (!selectedOrganization) {
+      setError("Select an organization first.");
+      return;
+    }
+
+    setError("");
+    setIsDeletingOrganization(true);
+
+    try {
+      const response = await fetch(`/api/organizations/${selectedOrganization.id}`, {
+        method: "DELETE",
+      });
+      await readApiResponse<{ success: true }>(
+        response,
+        "Failed to delete organization.",
+      );
+
+      setOrganizations((current) =>
+        current.filter((organization) => organization.id !== selectedOrganization.id),
+      );
+      setConnections([]);
+      setSelectedOrganizationId("");
+      setShowDeleteOrganizationModal(false);
+      setDeleteOrganizationConfirmation("");
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Failed to delete organization.",
+      );
+    } finally {
+      setIsDeletingOrganization(false);
     }
   }
 
@@ -321,6 +344,17 @@ export function OrganizationConnectionsPage() {
               className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-100 disabled:opacity-50"
             >
               Rename organization
+            </button>
+            <button
+              type="button"
+              disabled={!selectedOrganization}
+              onClick={() => {
+                setDeleteOrganizationConfirmation("");
+                setShowDeleteOrganizationModal(true);
+              }}
+              className="rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-sm transition hover:bg-red-50 disabled:opacity-50"
+            >
+              Delete organization
             </button>
             <button
               type="button"
@@ -497,6 +531,57 @@ export function OrganizationConnectionsPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        title="Delete organization"
+        description={
+          selectedOrganization
+            ? `Type "${selectedOrganization.name}" to confirm deletion. Organizations with locked connections cannot be deleted.`
+            : "Delete the selected organization."
+        }
+        isOpen={showDeleteOrganizationModal}
+        onClose={() => {
+          setShowDeleteOrganizationModal(false);
+          setDeleteOrganizationConfirmation("");
+        }}
+      >
+        <div className="grid gap-3">
+          <input
+            value={deleteOrganizationConfirmation}
+            onChange={(event) => setDeleteOrganizationConfirmation(event.target.value)}
+            placeholder="Type the organization name exactly"
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+          />
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Deleting an organization will also remove its unlocked connections.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowDeleteOrganizationModal(false);
+                setDeleteOrganizationConfirmation("");
+              }}
+              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:bg-zinc-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={
+                isDeletingOrganization ||
+                deleteOrganizationConfirmation !== (selectedOrganization?.name ?? "")
+              }
+              onClick={() => {
+                void handleDeleteOrganization();
+              }}
+              className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50"
+            >
+              {isDeletingOrganization ? "Deleting..." : "Delete organization"}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

@@ -12,8 +12,10 @@ import {
 import { useCopyJob } from "@/src/hooks/use-copy-job";
 import { useSelectedOrganization } from "@/src/hooks/use-selected-organization";
 import type { Connection, CopyMode, CopyJob, Organization } from "@/src/types/models";
+import { readApiResponse } from "@/src/utils/api-client";
 
 type ToolAction = "copy" | "export";
+type WizardStep = 1 | 2 | 3;
 
 export function CopyToolPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -22,6 +24,8 @@ export function CopyToolPage() {
   const [sourceDatabases, setSourceDatabases] = useState<string[]>([]);
   const [targetDatabases, setTargetDatabases] = useState<string[]>([]);
   const [collections, setCollections] = useState<string[]>([]);
+  const [isLoadingSourceDatabases, setIsLoadingSourceDatabases] = useState(false);
+  const [isLoadingTargetDatabases, setIsLoadingTargetDatabases] = useState(false);
   const [sourceConnectionId, setSourceConnectionId] = useState("");
   const [targetConnectionId, setTargetConnectionId] = useState("");
   const [sourceDatabase, setSourceDatabase] = useState("");
@@ -36,6 +40,7 @@ export function CopyToolPage() {
   const [isCancellingJobId, setIsCancellingJobId] = useState<string | null>(null);
   const [showLockedTargetModal, setShowLockedTargetModal] = useState(false);
   const [lockedTargetConfirmation, setLockedTargetConfirmation] = useState("");
+  const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   const organizationIds = useMemo(
     () => organizations.map((organization) => organization.id),
     [organizations],
@@ -86,8 +91,32 @@ export function CopyToolPage() {
   ] satisfies Array<{ value: ToolAction; label: string }>;
   const selectedTargetConnection =
     filteredConnections.find((connection) => connection.id === targetConnectionId) ?? null;
+  const selectedSourceConnection =
+    filteredConnections.find((connection) => connection.id === sourceConnectionId) ?? null;
   const requiresLockedTargetConfirmation =
     action === "copy" && Boolean(selectedTargetConnection?.locked);
+  const canProceedFromStep1 =
+    Boolean(selectedOrganizationId) &&
+    Boolean(sourceConnectionId) &&
+    (action === "export" || Boolean(targetConnectionId));
+  const canProceedFromStep2 =
+    Boolean(sourceDatabase) &&
+    (action === "export" || Boolean(targetDatabase)) &&
+    (action === "export" || sourceCollections.length > 0);
+  const canSubmit =
+    !isSubmitting &&
+    Boolean(selectedOrganizationId) &&
+    Boolean(sourceConnectionId) &&
+    Boolean(sourceDatabase) &&
+    (action === "export" ||
+      (Boolean(targetConnectionId) &&
+        Boolean(targetDatabase) &&
+        sourceCollections.length > 0 &&
+        (mode !== "new" || sourceCollections.length === 1)));
+  const stepLabels =
+    action === "copy"
+      ? ["Connections", "Source & target", "Copy options"]
+      : ["Connection", "Source data", "Review export"];
 
   useEffect(() => {
     void (async () => {
@@ -97,36 +126,25 @@ export function CopyToolPage() {
           fetch("/api/connections", { cache: "no-store" }),
         ]);
 
-        const organizationsPayload = (await organizationsResponse.json()) as
-          | Organization[]
-          | { error: string };
-        const connectionsPayload = (await connectionsResponse.json()) as
-          | Connection[]
-          | { error: string };
+        const organizationsPayload = await readApiResponse<Organization[]>(
+          organizationsResponse,
+          "Failed to load organizations.",
+        );
+        const connectionsPayload = await readApiResponse<Connection[]>(
+          connectionsResponse,
+          "Failed to load connections.",
+        );
 
-        if (!organizationsResponse.ok) {
-          throw new Error(
-            "error" in organizationsPayload
-              ? organizationsPayload.error
-              : "Failed to load organizations.",
-          );
-        }
-
-        if (!connectionsResponse.ok) {
-          throw new Error(
-            "error" in connectionsPayload
-              ? connectionsPayload.error
-              : "Failed to load connections.",
-          );
-        }
-
-        setOrganizations(organizationsPayload as Organization[]);
-        setConnections(connectionsPayload as Connection[]);
+        setOrganizations(organizationsPayload);
+        setConnections(connectionsPayload);
         const jobsResponse = await fetch("/api/copy/jobs", { cache: "no-store" });
-        const jobsPayload = (await jobsResponse.json()) as CopyJob[] | { error: string };
+        const jobsPayload = await readApiResponse<CopyJob[]>(
+          jobsResponse,
+          "Failed to load jobs.",
+        );
 
         if (jobsResponse.ok) {
-          setRecentJobs(jobsPayload as CopyJob[]);
+          setRecentJobs(jobsPayload);
         }
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Failed to load data.");
@@ -151,6 +169,7 @@ export function CopyToolPage() {
     setError("");
     setLockedTargetConfirmation("");
     setShowLockedTargetModal(false);
+    setCurrentStep(1);
   }, [action]);
 
   useEffect(() => {
@@ -159,27 +178,35 @@ export function CopyToolPage() {
   }, [targetConnectionId]);
 
   useEffect(() => {
+    if (currentStep > 1 && !canProceedFromStep1) {
+      setCurrentStep(1);
+      return;
+    }
+
+    if (currentStep > 2 && !canProceedFromStep2) {
+      setCurrentStep(2);
+    }
+  }, [canProceedFromStep1, canProceedFromStep2, currentStep]);
+
+  useEffect(() => {
     if (!sourceConnectionId) {
+      setIsLoadingSourceDatabases(false);
       setSourceDatabases([]);
       setSourceDatabase("");
       return;
     }
 
     void (async () => {
+      setIsLoadingSourceDatabases(true);
       try {
         const response = await fetch(
           `/api/copy/databases?connectionId=${sourceConnectionId}`,
           { cache: "no-store" },
         );
-        const payload = (await response.json()) as string[] | { error: string };
-
-        if (!response.ok) {
-          throw new Error(
-            "error" in payload ? payload.error : "Failed to load databases.",
-          );
-        }
-
-        const nextDatabases = payload as string[];
+        const nextDatabases = await readApiResponse<string[]>(
+          response,
+          "Failed to load databases.",
+        );
         setSourceDatabases(nextDatabases);
         setSourceDatabase((current) =>
           nextDatabases.includes(current) ? current : (nextDatabases[0] ?? ""),
@@ -190,32 +217,31 @@ export function CopyToolPage() {
             ? databaseError.message
             : "Failed to load databases.",
         );
+      } finally {
+        setIsLoadingSourceDatabases(false);
       }
     })();
   }, [sourceConnectionId]);
 
   useEffect(() => {
     if (!targetConnectionId) {
+      setIsLoadingTargetDatabases(false);
       setTargetDatabases([]);
       setTargetDatabase("");
       return;
     }
 
     void (async () => {
+      setIsLoadingTargetDatabases(true);
       try {
         const response = await fetch(
           `/api/copy/databases?connectionId=${targetConnectionId}`,
           { cache: "no-store" },
         );
-        const payload = (await response.json()) as string[] | { error: string };
-
-        if (!response.ok) {
-          throw new Error(
-            "error" in payload ? payload.error : "Failed to load databases.",
-          );
-        }
-
-        const nextDatabases = payload as string[];
+        const nextDatabases = await readApiResponse<string[]>(
+          response,
+          "Failed to load databases.",
+        );
         setTargetDatabases(nextDatabases);
         setTargetDatabase((current) =>
           nextDatabases.includes(current) ? current : (nextDatabases[0] ?? ""),
@@ -226,6 +252,8 @@ export function CopyToolPage() {
             ? databaseError.message
             : "Failed to load databases.",
         );
+      } finally {
+        setIsLoadingTargetDatabases(false);
       }
     })();
   }, [targetConnectionId]);
@@ -249,15 +277,10 @@ export function CopyToolPage() {
           `/api/copy/collections?connectionId=${sourceConnectionId}&databaseName=${encodeURIComponent(sourceDatabase)}`,
           { cache: "no-store" },
         );
-        const payload = (await response.json()) as string[] | { error: string };
-
-        if (!response.ok) {
-          throw new Error(
-            "error" in payload ? payload.error : "Failed to load collections.",
-          );
-        }
-
-        const nextCollections = payload as string[];
+        const nextCollections = await readApiResponse<string[]>(
+          response,
+          "Failed to load collections.",
+        );
         setCollections(nextCollections);
         setSourceCollections((current) =>
           current.filter((collectionName) => nextCollections.includes(collectionName)),
@@ -292,15 +315,10 @@ export function CopyToolPage() {
         }),
       });
 
-      const payload = (await response.json()) as CopyJob | { error: string };
-
-      if (!response.ok) {
-        throw new Error(
-          "error" in payload ? (payload.error ?? "Failed to start copy job.") : "Failed to start copy job.",
-        );
-      }
-
-      const nextJob = payload as CopyJob;
+      const nextJob = await readApiResponse<CopyJob>(
+        response,
+        "Failed to start copy job.",
+      );
       setJobId(nextJob.id);
       setRecentJobs((current) => [nextJob, ...current.filter((job) => job.id !== nextJob.id)]);
     } catch (submitError) {
@@ -328,13 +346,10 @@ export function CopyToolPage() {
         }),
       });
 
-      const payload = (await response.json()) as CopyJob | { error?: string };
-
-      if (!response.ok) {
-        throw new Error("error" in payload ? payload.error ?? "Failed to start export job." : "Failed to start export job.");
-      }
-
-      const nextJob = payload as CopyJob;
+      const nextJob = await readApiResponse<CopyJob>(
+        response,
+        "Failed to start export job.",
+      );
       setJobId(nextJob.id);
       setRecentJobs((current) => [nextJob, ...current.filter((job) => job.id !== nextJob.id)]);
     } catch (submitError) {
@@ -370,13 +385,10 @@ export function CopyToolPage() {
       const response = await fetch(`/api/copy/jobs/${targetJobId}`, {
         method: "PATCH",
       });
-      const payload = (await response.json()) as CopyJob | { error?: string };
-
-      if (!response.ok) {
-        throw new Error("error" in payload ? payload.error ?? "Failed to cancel job." : "Failed to cancel job.");
-      }
-
-      const updatedJob = payload as CopyJob;
+      const updatedJob = await readApiResponse<CopyJob>(
+        response,
+        "Failed to cancel job.",
+      );
       setRecentJobs((current) => [updatedJob, ...current.filter((job) => job.id !== updatedJob.id)]);
 
       if (jobId === targetJobId) {
@@ -387,6 +399,62 @@ export function CopyToolPage() {
     } finally {
       setIsCancellingJobId(null);
     }
+  }
+
+  function goToStep(step: WizardStep) {
+    if (step === currentStep) {
+      return;
+    }
+
+    if (step === 1) {
+      setCurrentStep(1);
+      return;
+    }
+
+    if (step === 2 && canProceedFromStep1) {
+      setCurrentStep(2);
+      return;
+    }
+
+    if (step === 3 && canProceedFromStep1 && canProceedFromStep2) {
+      setCurrentStep(3);
+    }
+  }
+
+  function renderStepBadge(step: WizardStep, label: string) {
+    const isActive = currentStep === step;
+    const isDone = currentStep > step;
+    const isClickable =
+      step === 1 || (step === 2 && canProceedFromStep1) || (step === 3 && canProceedFromStep2);
+
+    return (
+      <button
+        key={step}
+        type="button"
+        onClick={() => goToStep(step)}
+        disabled={!isClickable}
+        className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm text-left transition ${
+          isActive
+            ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+            : isDone
+              ? "border-zinc-300 bg-zinc-50 text-zinc-700"
+              : "border-zinc-200 bg-white text-zinc-500"
+        } ${isClickable ? "cursor-pointer hover:border-zinc-400" : "cursor-not-allowed opacity-60"}`}
+      >
+        <span
+          className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+            isActive
+              ? "bg-emerald-600 text-white"
+              : isDone
+                ? "bg-zinc-900 text-white"
+                : "bg-zinc-100 text-zinc-600"
+          }`}
+        >
+          {step}
+        </span>
+        <span className="font-medium">{label}</span>
+      </button>
+    );
   }
 
   return (
@@ -407,124 +475,212 @@ export function CopyToolPage() {
             : "Export one collection, several collections, or an entire database as a ZIP of JSON files."}
         </p>
 
+        <div className="mt-6 grid gap-3 md:grid-cols-3">
+          {stepLabels.map((label, index) =>
+            renderStepBadge((index + 1) as WizardStep, label),
+          )}
+        </div>
+
         <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
-          <SearchableDropdown
-            label="Action"
-            value={action}
-            options={actionOptions}
-            placeholder="Select an action"
-            onChange={(value) => setAction(value as ToolAction)}
-          />
-
-          <OrganizationSelector
-            organizations={organizations}
-            selectedOrganizationId={selectedOrganizationId}
-            onChange={setSelectedOrganizationId}
-          />
-
-          <SearchableDropdown
-            label="Source connection"
-            value={sourceConnectionId}
-            options={connectionOptions}
-            placeholder="Select source connection"
-            onChange={setSourceConnectionId}
-          />
-
-          {action === "copy" ? (
-            <SearchableDropdown
-              label="Target connection"
-              value={targetConnectionId}
-              options={connectionOptions}
-              placeholder="Select target connection"
-              onChange={setTargetConnectionId}
-            />
-          ) : null}
-
-          <SearchableDropdown
-            label="Source database"
-            value={sourceDatabase}
-            options={sourceDatabaseOptions}
-            placeholder="Select source database"
-            onChange={setSourceDatabase}
-            disabled={!sourceConnectionId}
-          />
-
-          {action === "copy" ? (
-            <SearchableDropdown
-              label="Target database"
-              value={targetDatabase}
-              options={targetDatabaseOptions}
-              placeholder="Select target database"
-              onChange={setTargetDatabase}
-              disabled={!targetConnectionId}
-            />
-          ) : null}
-
-          <MultiSearchableDropdown
-            label="Source collections"
-            values={sourceCollections}
-            options={collectionOptions}
-            placeholder={
-              action === "copy"
-                ? "Select one or more collections"
-                : "Leave empty to export the entire database"
-            }
-            onChange={setSourceCollections}
-            disabled={!sourceDatabase}
-          />
-
-          {collections.length > 0 ? (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setSourceCollections(collections)}
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
-              >
-                Select all collections
-              </button>
-              <button
-                type="button"
-                onClick={() => setSourceCollections([])}
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
-              >
-                Clear selection
-              </button>
-            </div>
-          ) : null}
-
-          {action === "copy" ? (
-            <SearchableDropdown
-              label="Copy mode"
-              value={mode}
-              options={modeOptions}
-              placeholder="Select copy mode"
-              onChange={(value) => setMode(value as CopyMode)}
-            />
-          ) : null}
-
-          {action === "copy" && mode === "new" ? (
-            <label className="grid gap-2 text-sm font-medium text-zinc-700">
-              New collection name
-              <input
-                value={newCollectionName}
-                onChange={(event) => setNewCollectionName(event.target.value)}
-                className="rounded-md border border-zinc-300 px-3 py-2"
-                required
+          {currentStep === 1 ? (
+            <>
+              <SearchableDropdown
+                label="Action"
+                value={action}
+                options={actionOptions}
+                placeholder="Select an action"
+                onChange={(value) => setAction(value as ToolAction)}
               />
-            </label>
+
+              <OrganizationSelector
+                organizations={organizations}
+                selectedOrganizationId={selectedOrganizationId}
+                onChange={setSelectedOrganizationId}
+              />
+
+              <SearchableDropdown
+                label="Source connection"
+                value={sourceConnectionId}
+                options={connectionOptions}
+                placeholder="Select source connection"
+                onChange={setSourceConnectionId}
+              />
+
+              {action === "copy" ? (
+                <SearchableDropdown
+                  label="Target connection"
+                  value={targetConnectionId}
+                  options={connectionOptions}
+                  placeholder="Select target connection"
+                  onChange={setTargetConnectionId}
+                />
+              ) : null}
+            </>
           ) : null}
 
-          {action === "copy" && mode === "new" && sourceCollections.length > 1 ? (
-            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              `Copy to new collection` supports exactly one source collection.
-            </p>
+          {currentStep === 2 ? (
+            <>
+              <SearchableDropdown
+                label="Source database"
+                value={sourceDatabase}
+                options={sourceDatabaseOptions}
+                placeholder={
+                  isLoadingSourceDatabases
+                    ? "Loading source databases..."
+                    : "Select source database"
+                }
+                onChange={setSourceDatabase}
+                disabled={!sourceConnectionId}
+              />
+              {isLoadingSourceDatabases ? (
+                <p className="text-sm text-zinc-500">
+                  Loading source databases from `{selectedSourceConnection?.name ?? "selected connection"}`...
+                </p>
+              ) : null}
+
+              {action === "copy" ? (
+                <>
+                  <SearchableDropdown
+                    label="Target database"
+                    value={targetDatabase}
+                    options={targetDatabaseOptions}
+                    placeholder={
+                      isLoadingTargetDatabases
+                        ? "Loading target databases..."
+                        : "Select target database"
+                    }
+                    onChange={setTargetDatabase}
+                    disabled={!targetConnectionId}
+                  />
+                  {isLoadingTargetDatabases ? (
+                    <p className="text-sm text-zinc-500">
+                      Loading target databases from `{selectedTargetConnection?.name ?? "selected connection"}`...
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+
+              <MultiSearchableDropdown
+                label="Source collections"
+                values={sourceCollections}
+                options={collectionOptions}
+                placeholder={
+                  action === "copy"
+                    ? "Select one or more collections"
+                    : "Leave empty to export the entire database"
+                }
+                onChange={setSourceCollections}
+                disabled={!sourceDatabase}
+              />
+
+              {collections.length > 0 ? (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSourceCollections(collections)}
+                    className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Select all collections
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSourceCollections([])}
+                    className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              ) : null}
+
+              {action === "export" ? (
+                <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  If no collections are selected, the export will include the entire
+                  source database as one ZIP file with one JSON file per collection.
+                </p>
+              ) : null}
+            </>
           ) : null}
 
-          {action === "export" ? (
-            <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-              If no collections are selected, the export will include the entire
-              source database as one ZIP file with one JSON file per collection.
-            </p>
+          {currentStep === 3 ? (
+            <>
+              {action === "copy" ? (
+                <>
+                  <SearchableDropdown
+                    label="Copy mode"
+                    value={mode}
+                    options={modeOptions}
+                    placeholder="Select copy mode"
+                    onChange={(value) => setMode(value as CopyMode)}
+                  />
+
+                  {mode === "new" ? (
+                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
+                      New collection name
+                      <input
+                        value={newCollectionName}
+                        onChange={(event) => setNewCollectionName(event.target.value)}
+                        className="rounded-md border border-zinc-300 px-3 py-2"
+                        required
+                      />
+                    </label>
+                  ) : null}
+
+                  {mode === "new" && sourceCollections.length > 1 ? (
+                    <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      `Copy to new collection` supports exactly one source collection.
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  Review the selected source below, then start the export when ready.
+                </p>
+              )}
+
+              <div className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700">
+                <div className="grid gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Organization
+                  </span>
+                  <span>
+                    {organizations.find((organization) => organization.id === selectedOrganizationId)
+                      ?.name ?? "Not selected"}
+                  </span>
+                </div>
+                <div className="grid gap-1 md:grid-cols-2 md:gap-4">
+                  <div className="grid gap-1">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                      Source
+                    </span>
+                    <span>{selectedSourceConnection?.name ?? "Not selected"}</span>
+                    <span className="text-zinc-500">{sourceDatabase || "No database selected"}</span>
+                  </div>
+                  {action === "copy" ? (
+                    <div className="grid gap-1">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Target
+                      </span>
+                      <span>{selectedTargetConnection?.name ?? "Not selected"}</span>
+                      <span className="text-zinc-500">
+                        {targetDatabase || "No database selected"}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="grid gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Collections
+                  </span>
+                  <span>
+                    {sourceCollections.length > 0
+                      ? sourceCollections.join(", ")
+                      : action === "export"
+                        ? "Entire database export"
+                        : "No collections selected"}
+                  </span>
+                </div>
+              </div>
+            </>
           ) : null}
 
           {error ? (
@@ -540,33 +696,54 @@ export function CopyToolPage() {
             </p>
           ) : null}
 
-          <button
-            type="submit"
-            disabled={
-              isSubmitting ||
-              !selectedOrganizationId ||
-              !sourceConnectionId ||
-              !sourceDatabase ||
-              (action === "copy" &&
-                (!targetConnectionId ||
-                  !targetDatabase ||
-                  sourceCollections.length === 0 ||
-                  (mode === "new" && sourceCollections.length !== 1)))
-            }
-            className={
-              action === "copy"
-                ? "rounded-md bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
-                : "rounded-md bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
-            }
-          >
-            {isSubmitting
-              ? action === "copy"
-                ? "Starting..."
-                : "Preparing export..."
-              : action === "copy"
-                ? "Execute copy"
-                : "Export ZIP"}
-          </button>
+          <div className="flex flex-wrap justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setCurrentStep((current) => Math.max(1, current - 1) as WizardStep)}
+              disabled={currentStep === 1}
+              className="rounded-md border border-zinc-300 px-4 py-3 text-sm font-semibold text-zinc-700 disabled:opacity-50"
+            >
+              Back
+            </button>
+
+            <div className="flex gap-3">
+              {currentStep < 3 ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentStep((current) =>
+                      Math.min(3, current + 1) as WizardStep,
+                    )
+                  }
+                  disabled={
+                    (currentStep === 1 && !canProceedFromStep1) ||
+                    (currentStep === 2 && !canProceedFromStep2)
+                  }
+                  className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className={
+                    action === "copy"
+                      ? "rounded-md bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                      : "rounded-md bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                  }
+                >
+                  {isSubmitting
+                    ? action === "copy"
+                      ? "Starting..."
+                      : "Preparing export..."
+                    : action === "copy"
+                      ? "Execute copy"
+                      : "Export ZIP"}
+                </button>
+              )}
+            </div>
+          </div>
         </form>
       </section>
 
