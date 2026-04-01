@@ -1,0 +1,14 @@
+export const APP_NAME = "MongoSync Local";
+export const APP_DATA_DIR_NAME = "MongoSyncLocal";
+export const APP_DATA_FILE_NAME = "config.json";
+export const SESSION_SECRET_FILE_NAME = "session-secret.key";
+export const SESSION_COOKIE_NAME = "mongosync_session";
+export const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+export const COPY_BATCH_SIZE = 500;
+export const COPY_LOG_LIMIT = 200;
+export const POLL_INTERVAL_MS = 1500;
+export const JOBS_DIR_NAME = "jobs";
+export const JOB_ENCRYPTION_KEY_FILE_NAME = "jobs-secret.key";
+export const JOB_LOG_RETENTION_DAYS = 10;
+export const JOB_RETENTION_MS = JOB_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+export const JOB_RUNTIME_CACHE_LIMIT = 100;
