@@ -1,4 +1,4 @@
-![image](/public/assets/full%20logo.png)
+![image](/public/assets/name%20only.png)
 
 # MongoSync
 
