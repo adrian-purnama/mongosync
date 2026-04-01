@@ -2,9 +2,6 @@
   <img src="public/assets/logo%20only.png" alt="MongoSync logo" width="90" />
   <img src="public/assets/name%20only.png" alt="MongoSync name" width="180" />
 </div>
-
-# MongoSync
-
 MongoSync is a desktop application that helps developer copy db to db and export entire db, this project is supposed to help developer when developing or debugging their application by quickly copying entire db or exporting entire DB. This application is AES encrypted by your own initial password
 
 [Release v0.1.0](https://github.com/adrian-purnama/mongosync/releases/tag/v0.1.0)
