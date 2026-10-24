@@ -10,8 +10,8 @@
     "start": "next start",
     "electron:dev": "electron .",
     "electron:start": "electron .",
-    "dist:win": "npm run build && electron-builder --win portable",
-    "dist:win:nsis": "npm run build && electron-builder --win nsis",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "dist:win:portable": "npm run build && electron-builder --win portable",
     "lint": "eslint",
     "test": "vitest run",
     "bench:copy": "tsx scripts/bench-copy.ts"
@@ -54,18 +54,18 @@
       "app/**/*",
       "electron/**/*",
       "public/**/*",
-      "src/**/*",
       ".next/**/*",
       "next.config.ts",
       "package.json",
-      "!**/.next/cache/**"
+      "!**/.next/cache/**",
+      "!.next/dev/**"
     ],
     "win": {
       "target": [
-        "portable"
+        "nsis"
       ],
       "icon": "electron/assets/icon.ico",
-      "artifactName": "MongoSync-${version}.${ext}"
+      "artifactName": "MongoSync-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
