@@ -312,15 +312,29 @@ export async function listCopyJobs() {
   return [...jobs.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
+const ACTIVE_JOB_STATUSES = new Set<CopyJob["status"]>([
+  "queued",
+  "running",
+  "verifying",
+  "swapping",
+]);
+
+function isActiveJobStatus(status: CopyJob["status"]) {
+  return ACTIVE_JOB_STATUSES.has(status);
+}
+
+/**
+ * In-memory only — safe for Electron quit checks.
+ * Does not touch disk or run scrypt decryption (which would freeze the UI).
+ * Live jobs are always present in the runtime cache while this process runs them.
+ */
+export function listActiveCopyJobsFromMemory() {
+  return [...jobs.values()].filter((job) => isActiveJobStatus(job.status));
+}
+
 export async function listActiveCopyJobs() {
   const allJobs = await listCopyJobs();
-  return allJobs.filter(
-    (job) =>
-      job.status === "queued" ||
-      job.status === "running" ||
-      job.status === "verifying" ||
-      job.status === "swapping",
-  );
+  return allJobs.filter((job) => isActiveJobStatus(job.status));
 }
 
 export async function createExportJob(
