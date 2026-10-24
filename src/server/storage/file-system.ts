@@ -21,7 +21,11 @@ function getBaseAppDataDirectory() {
   }
 
   if (process.env.NODE_ENV === "test") {
-    return path.join(process.cwd(), ".tmp", "mongosync-local");
+    return path.join(
+      /* turbopackIgnore: true */ process.cwd(),
+      ".tmp",
+      "mongosync-local",
+    );
   }
 
   if (process.platform === "win32" && process.env.APPDATA) {

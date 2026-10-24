@@ -19,7 +19,9 @@ import {
   getJobArtifactPath,
 } from "@/src/server/jobs/job-files";
 
-const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
+const nodeRequire = createRequire(
+  path.join(/* turbopackIgnore: true */ process.cwd(), "package.json"),
+);
 type ArchiverInstance = {
   append: (
     source: NodeJS.ReadableStream | Buffer | string,

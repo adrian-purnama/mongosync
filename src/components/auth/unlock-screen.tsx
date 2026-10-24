@@ -115,7 +115,7 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
       </aside>
 
       {/* Form panel */}
-      <main className="relative flex flex-col bg-paper px-6 py-8 sm:px-10">
+      <main className="relative flex flex-col bg-paper px-6 pb-8 pt-[calc(var(--titlebar-height)+2rem)] sm:px-10">
         <div className="flex items-center justify-between">
           <Link href="/" className="lg:invisible">
             <Logo size="sm" />

@@ -83,7 +83,7 @@ export function ManualLandingPage() {
         <div className="bg-grid-dark pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_75%)]" />
         <div className="pointer-events-none absolute -top-40 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-sync/25 blur-[120px]" />
 
-        <header className="relative z-10">
+        <header className="relative z-10 pt-[var(--titlebar-height)]">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-6 px-6 py-5">
             <Logo tone="dark" size="md" />
             <nav className="hidden items-center gap-1 md:flex">

@@ -64,12 +64,15 @@
         "portable"
       ],
       "artifactName": "MongoSync-Local-${version}.${ext}",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "electron/assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "icon": "electron/assets/icon.png",
+    "afterPack": "./scripts/after-pack.cjs"
   },
   "optionalDependencies": {
     "@mongodb-js/zstd": "^7.0.0",

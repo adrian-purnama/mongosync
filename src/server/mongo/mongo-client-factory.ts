@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import path from "node:path";
+
 import { MongoClient, type MongoClientOptions, ReadPreference } from "mongodb";
 
 import {
@@ -6,21 +9,26 @@ import {
   MONGO_SOCKET_TIMEOUT_MS,
 } from "@/src/server/mongo/copy-config";
 
+/**
+ * Probe optional native compressors at runtime without letting Turbopack
+ * statically bundle them into the Next.js ESM graph.
+ */
 function resolveCompressors(): Array<"zstd" | "snappy" | "zlib"> {
   const compressors: Array<"zstd" | "snappy" | "zlib"> = [];
+  const nodeRequire = createRequire(
+    path.join(/* turbopackIgnore: true */ process.cwd(), "package.json"),
+  );
 
-  try {
-    require("@mongodb-js/zstd");
-    compressors.push("zstd");
-  } catch {
-    // optional
-  }
-
-  try {
-    require("snappy");
-    compressors.push("snappy");
-  } catch {
-    // optional
+  for (const candidate of [
+    { id: "@mongodb-js/" + "zstd", name: "zstd" as const },
+    { id: "snap" + "py", name: "snappy" as const },
+  ]) {
+    try {
+      nodeRequire(candidate.id);
+      compressors.push(candidate.name);
+    } catch {
+      // optional native addon — fall through to zlib
+    }
   }
 
   compressors.push("zlib");

@@ -17,18 +17,20 @@ export function AppNav() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 z-40 border-b border-white/5 bg-ink text-paper lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:border-b-0 lg:border-r">
-      <div className="flex h-full items-center gap-4 px-4 py-3 lg:flex-col lg:items-stretch lg:gap-0 lg:px-4 lg:py-6">
+    <aside className="sticky top-[var(--titlebar-height)] z-40 border-b border-white/5 bg-ink text-paper lg:min-h-[calc(100dvh-var(--titlebar-height))] lg:border-b-0 lg:border-r lg:border-white/5">
+      <div className="flex items-center gap-4 px-4 py-3 lg:flex-col lg:items-stretch lg:gap-0 lg:px-4 lg:py-6">
         <Link href="/workspace" className="shrink-0 lg:px-2">
           <Logo tone="dark" size="sm" />
         </Link>
 
-        <p className="hidden px-3 pb-2 pt-9 font-display text-[10px] font-medium uppercase tracking-[0.2em] text-fog/60 lg:block">
+        <p className="hidden px-3 pb-2 pt-8 font-display text-[10px] font-medium uppercase tracking-[0.2em] text-fog/60 lg:block">
           Navigate
         </p>
-        <nav className="flex flex-1 items-center gap-1 lg:flex-none lg:flex-col lg:items-stretch">
+
+        <nav className="flex min-w-0 flex-1 items-center gap-1 lg:flex-none lg:flex-col lg:items-stretch lg:gap-0.5">
           {navItems.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const active =
+              pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
               <Link
@@ -43,7 +45,7 @@ export function AppNav() {
                 )}
               >
                 {active ? (
-                  <span className="absolute -left-4 hidden h-5 w-1 rounded-r-full bg-sync-glow lg:block" />
+                  <span className="absolute left-0 hidden h-5 w-1 rounded-r-full bg-sync-glow lg:block" />
                 ) : null}
                 <Icon
                   size={17}
@@ -55,9 +57,9 @@ export function AppNav() {
           })}
         </nav>
 
-        <div className="flex items-center gap-1 lg:mt-auto lg:grid lg:gap-1">
-          <div className="mb-3 hidden items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 lg:flex">
-            <span className="relative flex size-2">
+        <div className="mt-6 hidden border-t border-white/[0.06] pt-4 lg:grid lg:gap-1">
+          <div className="mb-1 flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
+            <span className="relative flex size-2 shrink-0">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-sync-glow opacity-50" />
               <span className="relative inline-flex size-2 rounded-full bg-sync-glow" />
             </span>
@@ -72,7 +74,18 @@ export function AppNav() {
             className="flex h-9 items-center gap-3 rounded-[10px] px-3 text-sm font-medium text-fog transition hover:bg-white/[0.04] hover:text-paper"
           >
             <IconHelp size={17} className="text-fog/70" />
-            <span className="hidden lg:inline">How it works</span>
+            <span>How it works</span>
+          </Link>
+          <LogoutButton />
+        </div>
+
+        <div className="flex items-center gap-1 lg:hidden">
+          <Link
+            href="/"
+            aria-label="How this app works"
+            className="flex h-9 items-center gap-3 rounded-[10px] px-3 text-sm font-medium text-fog transition hover:bg-white/[0.04] hover:text-paper"
+          >
+            <IconHelp size={17} className="text-fog/70" />
           </Link>
           <LogoutButton />
         </div>
