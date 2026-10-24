@@ -63,9 +63,19 @@ export async function appendTextFile(filePath: string, value: string) {
 
 export async function writeTextFileAtomically(filePath: string, value: string) {
   await ensureDirectory(path.dirname(filePath));
-  const tempPath = `${filePath}.${Date.now()}.tmp`;
+  const tempPath = `${filePath}.${process.hrtime.bigint()}.tmp`;
   await writeFile(tempPath, value, "utf8");
-  await rename(tempPath, filePath);
+  try {
+    await rename(tempPath, filePath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EPERM" || code === "EEXIST" || code === "ENOENT") {
+      await writeFile(filePath, value, "utf8");
+      await rm(tempPath, { force: true }).catch(() => undefined);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function listDirectory(directoryPath: string) {

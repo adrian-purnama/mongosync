@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 
+import { IconLock } from "@/src/components/ui/icons";
+
 export function LogoutButton() {
   const router = useRouter();
 
@@ -18,9 +20,11 @@ export function LogoutButton() {
     <button
       type="button"
       onClick={handleLogout}
-      className="rounded-md border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+      aria-label="Lock app"
+      className="flex h-9 items-center gap-3 rounded-[10px] px-3 text-sm font-medium text-fog transition hover:bg-white/[0.04] hover:text-paper"
     >
-      Lock app
+      <IconLock size={17} className="text-fog/70" />
+      <span className="hidden lg:inline">Lock app</span>
     </button>
   );
 }

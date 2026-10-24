@@ -5,6 +5,19 @@ import { useEffect, useMemo, useState } from "react";
 import { ConnectionCard } from "@/src/components/connections/connection-card";
 import { OrganizationSelector } from "@/src/components/orgs/organization-selector";
 import { Modal } from "@/src/components/shared/modal";
+import { Button } from "@/src/components/ui/button";
+import { Alert, Badge, EmptyState } from "@/src/components/ui/feedback";
+import { Field, Input, Toggle } from "@/src/components/ui/field";
+import {
+  IconBuilding,
+  IconDatabase,
+  IconKey,
+  IconLock,
+  IconPencil,
+  IconPlus,
+  IconShield,
+} from "@/src/components/ui/icons";
+import { Card, CardHeader, PageHeader } from "@/src/components/ui/layout";
 import { useSelectedOrganization } from "@/src/hooks/use-selected-organization";
 import type { Connection, Organization } from "@/src/types/models";
 
@@ -15,6 +28,7 @@ export function OrganizationConnectionsPage() {
   const [connectionName, setConnectionName] = useState("");
   const [mongoUrl, setMongoUrl] = useState("");
   const [locked, setLocked] = useState(false);
+  const [environment, setEnvironment] = useState<"prod" | "staging" | "dev" | "local">("local");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingConnection, setIsSavingConnection] = useState(false);
@@ -127,6 +141,7 @@ export function OrganizationConnectionsPage() {
           name: connectionName,
           mongoUrl,
           locked,
+          environment,
           organizationId: selectedOrganizationId,
         }),
       });
@@ -142,6 +157,7 @@ export function OrganizationConnectionsPage() {
       setConnectionName("");
       setMongoUrl("");
       setLocked(false);
+      setEnvironment("local");
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to create connection.");
     } finally {
@@ -216,6 +232,7 @@ export function OrganizationConnectionsPage() {
       name: string;
       mongoUrl?: string;
       locked: boolean;
+      environment: "prod" | "staging" | "dev" | "local";
       organizationId: string;
     },
   ) {
@@ -275,123 +292,132 @@ export function OrganizationConnectionsPage() {
     }
   }
 
+
+  const lockedCount = connections.filter((connection) => connection.locked).length;
+
+  function closeChangePasswordModal() {
+    setShowChangePasswordModal(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+  }
+
+  function closeRenameModal() {
+    setShowRenameOrganizationModal(false);
+    setRenameOrganizationName("");
+  }
+
   return (
-    <div className="grid gap-6">
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-zinc-950">Workspace</h2>
-        <p className="mt-2 text-sm text-zinc-600">
-          Create an organization, switch active organization, and manage its
-          MongoDB connections in one place.
-        </p>
+    <div className="grid gap-8">
+      <PageHeader
+        eyebrow="Workspace"
+        title={selectedOrganization?.name ?? "Your workspace"}
+        description="Group MongoDB connections by organization. Every connection string is verified before saving and encrypted on this machine."
+        actions={
+          <Button icon={<IconKey size={15} />} onClick={() => setShowChangePasswordModal(true)}>
+            Change password
+          </Button>
+        }
+      />
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr]">
-          <OrganizationSelector
-            organizations={organizations}
-            selectedOrganizationId={selectedOrganizationId}
-            onChange={setSelectedOrganizationId}
-          />
-
-          <form className="flex gap-2" onSubmit={handleCreateOrganization}>
-            <input
-              value={organizationName}
-              onChange={(event) => setOrganizationName(event.target.value)}
-              placeholder="Add organization"
-              className="flex-1 rounded-md border border-zinc-300 px-3 py-2"
-              required
-            />
-            <button
-              type="submit"
-              disabled={isSavingOrganization}
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
-            >
-              {isSavingOrganization ? "Saving..." : "Create"}
-            </button>
-          </form>
-        </div>
-
-        <div className="mt-4">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
+      {/* Organization bar */}
+      <Card className="p-2">
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
+          <div className="flex items-center gap-2 p-2">
+            <div className="min-w-0 flex-1">
+              <OrganizationSelector
+                organizations={organizations}
+                selectedOrganizationId={selectedOrganizationId}
+                onChange={setSelectedOrganizationId}
+                hideLabel
+              />
+            </div>
+            <Button
               disabled={!selectedOrganization}
+              aria-label="Rename organization"
+              title="Rename organization"
+              size="icon"
               onClick={() => {
                 setRenameOrganizationName(selectedOrganization?.name ?? "");
                 setShowRenameOrganizationModal(true);
               }}
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-100 disabled:opacity-50"
             >
-              Rename organization
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowChangePasswordModal(true)}
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-100"
-            >
-              Change password
-            </button>
+              <IconPencil size={15} />
+            </Button>
           </div>
-        </div>
-      </section>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-zinc-950">Connections</h3>
-          <span className="text-sm text-zinc-500">{connections.length} visible</span>
-        </div>
+          <span className="mx-2 hidden h-8 w-px bg-line md:block" />
 
-        <form className="grid gap-3 md:grid-cols-2" onSubmit={handleCreateConnection}>
-          <input
-            value={connectionName}
-            onChange={(event) => setConnectionName(event.target.value)}
-            placeholder="Connection name"
-            className="rounded-md border border-zinc-300 px-3 py-2"
-            required
-          />
-          <input
-            value={mongoUrl}
-            onChange={(event) => setMongoUrl(event.target.value)}
-            placeholder="mongodb://..."
-            className="rounded-md border border-zinc-300 px-3 py-2"
-            required
-          />
-          <label className="flex items-center gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={locked}
-              onChange={(event) => setLocked(event.target.checked)}
+          <form className="flex items-center gap-2 p-2" onSubmit={handleCreateOrganization}>
+            <Input
+              value={organizationName}
+              onChange={(event) => setOrganizationName(event.target.value)}
+              placeholder="New organization name"
+              aria-label="New organization name"
+              required
             />
-            Locked connection
-          </label>
-          <button
-            type="submit"
-            disabled={isSavingConnection || !selectedOrganizationId}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {isSavingConnection ? "Checking and saving..." : "Add connection"}
-          </button>
-        </form>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={isSavingOrganization}
+              icon={<IconPlus size={15} />}
+            >
+              {isSavingOrganization ? "Saving..." : "Create"}
+            </Button>
+          </form>
+        </div>
+      </Card>
 
-        <p className="mt-4 text-sm text-zinc-500">
-          New connections are verified with MongoDB before they are saved.
-        </p>
+      {/* Stats */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat
+          icon={<IconBuilding size={16} />}
+          label="Organizations"
+          value={isLoading ? "–" : organizations.length}
+        />
+        <Stat
+          icon={<IconDatabase size={16} />}
+          label="Connections in this org"
+          value={selectedOrganizationId ? connections.length : "–"}
+        />
+        <Stat
+          icon={<IconLock size={16} />}
+          label="Locked targets"
+          value={selectedOrganizationId ? lockedCount : "–"}
+        />
+      </div>
 
-        {error ? (
-          <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </p>
-        ) : null}
+      {error ? <Alert tone="danger">{error}</Alert> : null}
 
-        <div className="mt-6">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        {/* Connections list */}
+        <section className="grid gap-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-lg font-semibold tracking-[-0.01em]">Connections</h2>
+            <Badge>{connections.length} saved</Badge>
+          </div>
+
           {isLoading ? (
-            <p className="text-sm text-zinc-500">Loading workspace data...</p>
+            <div className="grid gap-4 md:grid-cols-2">
+              {[0, 1].map((key) => (
+                <div
+                  key={key}
+                  className="h-[132px] animate-pulse rounded-[var(--radius-card)] border border-line bg-surface"
+                />
+              ))}
+            </div>
           ) : selectedOrganizationId === "" ? (
-            <p className="text-sm text-zinc-500">Select an organization to manage connections.</p>
+            <EmptyState icon={<IconBuilding size={20} />} title="Create your first organization">
+              Organizations group related connections, such as a client or a product. Add one
+              above to start saving connections.
+            </EmptyState>
           ) : connections.length === 0 ? (
-            <p className="text-sm text-zinc-500">
-              No connections yet for this organization.
-            </p>
+            <EmptyState icon={<IconDatabase size={20} />} title="No connections yet">
+              Add a MongoDB connection string using the form. It&apos;s tested with a live ping
+              before it&apos;s saved.
+            </EmptyState>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
               {connections.map((connection) => (
                 <ConnectionCard
                   key={connection.id}
@@ -402,102 +428,168 @@ export function OrganizationConnectionsPage() {
               ))}
             </div>
           )}
-        </div>
-      </section>
+        </section>
+
+        {/* Add connection */}
+        <Card className="p-5 xl:sticky xl:top-10">
+          <CardHeader
+            icon={<IconPlus size={17} />}
+            title="Add connection"
+            description={
+              selectedOrganization
+                ? `Saved to ${selectedOrganization.name}`
+                : "Select an organization first"
+            }
+          />
+          <form className="mt-5 grid gap-4" onSubmit={handleCreateConnection}>
+            <Field label="Name">
+              <Input
+                value={connectionName}
+                onChange={(event) => setConnectionName(event.target.value)}
+                placeholder="e.g. Production"
+                required
+              />
+            </Field>
+            <Field label="Connection string">
+              <Input
+                value={mongoUrl}
+                onChange={(event) => setMongoUrl(event.target.value)}
+                placeholder="mongodb+srv://user:pass@host"
+                className="font-mono text-[13px]"
+                required
+              />
+            </Field>
+            <Field label="Environment">
+              <select
+                value={environment}
+                onChange={(event) =>
+                  setEnvironment(
+                    event.target.value as "prod" | "staging" | "dev" | "local",
+                  )
+                }
+                className="h-10 w-full rounded-[10px] border border-line bg-paper px-3 text-[13px] text-ink"
+              >
+                <option value="local">local</option>
+                <option value="dev">dev</option>
+                <option value="staging">staging</option>
+                <option value="prod">prod</option>
+              </select>
+            </Field>
+            <Toggle
+              checked={locked}
+              onChange={setLocked}
+              label="Locked connection"
+              description="Protect production: requires confirmation as a target."
+            />
+            <Button
+              type="submit"
+              variant="accent"
+              loading={isSavingConnection}
+              disabled={!selectedOrganizationId}
+              className="w-full"
+            >
+              {isSavingConnection ? "Checking and saving..." : "Verify & save"}
+            </Button>
+            <p className="flex items-center gap-1.5 text-xs text-subtle">
+              <IconShield size={13} />
+              Verified with MongoDB, then encrypted locally.
+            </p>
+          </form>
+        </Card>
+      </div>
 
       <Modal
         title="Rename organization"
         description="Update the name of the currently selected organization."
         isOpen={showRenameOrganizationModal}
-        onClose={() => {
-          setShowRenameOrganizationModal(false);
-          setRenameOrganizationName("");
-        }}
+        onClose={closeRenameModal}
+        icon={<IconPencil size={17} />}
       >
-        <form className="grid gap-3" onSubmit={handleRenameOrganization}>
-          <input
+        <form className="grid gap-4" onSubmit={handleRenameOrganization}>
+          <Input
             value={renameOrganizationName}
             onChange={(event) => setRenameOrganizationName(event.target.value)}
             placeholder="Organization name"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+            autoFocus
             required
           />
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowRenameOrganizationModal(false);
-                setRenameOrganizationName("");
-              }}
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:bg-zinc-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isRenamingOrganization}
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
-            >
+            <Button onClick={closeRenameModal}>Cancel</Button>
+            <Button type="submit" variant="primary" loading={isRenamingOrganization}>
               {isRenamingOrganization ? "Renaming..." : "Save name"}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
 
       <Modal
         title="Change master password"
-        description="Enter your current password and a new password. Existing saved connections will be re-encrypted."
+        description="Existing saved connections will be re-encrypted with the new password."
         isOpen={showChangePasswordModal}
-        onClose={() => {
-          setShowChangePasswordModal(false);
-          setCurrentPassword("");
-          setNewPassword("");
-          setConfirmNewPassword("");
-        }}
+        onClose={closeChangePasswordModal}
+        icon={<IconKey size={17} />}
       >
-        <form className="grid gap-3" onSubmit={handleChangePassword}>
-          <input
-            type="password"
-            value={currentPassword}
-            onChange={(event) => setCurrentPassword(event.target.value)}
-            placeholder="Current password"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            required
-          />
-          <input
-            type="password"
-            value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-            placeholder="New password"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            required
-          />
-          <input
-            type="password"
-            value={confirmNewPassword}
-            onChange={(event) => setConfirmNewPassword(event.target.value)}
-            placeholder="Confirm new password"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            required
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setShowChangePasswordModal(false)}
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:bg-zinc-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isChangingPassword}
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
-            >
+        <form className="grid gap-4" onSubmit={handleChangePassword}>
+          <Field label="Current password">
+            <Input
+              type="password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              autoComplete="current-password"
+              autoFocus
+              required
+            />
+          </Field>
+          <Field label="New password">
+            <Input
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </Field>
+          <Field label="Confirm new password">
+            <Input
+              type="password"
+              value={confirmNewPassword}
+              onChange={(event) => setConfirmNewPassword(event.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </Field>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button onClick={closeChangePasswordModal}>Cancel</Button>
+            <Button type="submit" variant="primary" loading={isChangingPassword}>
               {isChangingPassword ? "Updating..." : "Update password"}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
+    </div>
+  );
+}
+
+function Stat({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-line bg-surface px-4 py-3.5 shadow-card">
+      <span className="flex size-9 items-center justify-center rounded-[10px] bg-paper text-muted ring-1 ring-line">
+        {icon}
+      </span>
+      <div>
+        <p className="font-display text-xl font-semibold leading-none tracking-[-0.02em] text-ink">
+          {value}
+        </p>
+        <p className="mt-1 text-xs text-muted">{label}</p>
+      </div>
     </div>
   );
 }

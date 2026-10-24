@@ -18,10 +18,18 @@ export const organizationSchema = z.object({
   name: z.string().trim().min(1).max(80),
 });
 
+export const connectionEnvironmentSchema = z.enum([
+  "prod",
+  "staging",
+  "dev",
+  "local",
+]);
+
 export const connectionSchema = z.object({
   name: z.string().trim().min(1).max(80),
   mongoUrl: mongoUrlSchema,
   locked: z.boolean().default(false),
+  environment: connectionEnvironmentSchema.default("local"),
   organizationId: objectIdLike,
 });
 
@@ -57,4 +65,30 @@ export const exportRequestSchema = z.object({
   sourceConnectionId: objectIdLike,
   sourceDatabase: z.string().trim().min(1),
   sourceCollections: z.array(z.string().trim().min(1)).optional(),
+  useMongodump: z.boolean().optional(),
+});
+
+export const importZipRequestSchema = z.object({
+  organizationId: objectIdLike,
+  targetConnectionId: objectIdLike,
+  targetDatabase: z.string().trim().min(1),
+  filePath: z.string().trim().min(1),
+});
+
+export const forceUnlockRequestSchema = z.object({
+  connectionId: objectIdLike,
+  database: z.string().trim().min(1),
+  confirmDatabaseName: z.string().trim().min(1),
+});
+
+export const cleanupBackupsRequestSchema = z.object({
+  organizationId: objectIdLike,
+  targetConnectionId: objectIdLike,
+  targetDatabase: z.string().trim().min(1),
+  keepJobs: z.number().int().positive().optional(),
+});
+
+export const targetLockQuerySchema = z.object({
+  connectionId: objectIdLike,
+  database: z.string().trim().min(1),
 });

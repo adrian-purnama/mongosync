@@ -2,11 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  deleteConnection,
   createConnection,
+  deleteConnection,
 } from "@/src/server/connections/connection-service";
 import { startCopyJob } from "@/src/server/mongo/copy-service";
 import { hashMasterPassword, verifyMasterPassword } from "@/src/server/auth/password-service";
@@ -15,6 +15,18 @@ import {
   encryptSecret,
 } from "@/src/server/security/encryption-service";
 import { saveAppData } from "@/src/server/storage/config-store";
+
+vi.mock("@/src/server/mongo/mongo-client-factory", () => ({
+  createMongoClient: vi.fn(async () => ({
+    close: async () => undefined,
+    db: () => ({
+      admin: () => ({
+        command: async () => ({ ok: 1 }),
+      }),
+    }),
+  })),
+  verifyMongoConnection: vi.fn(async () => undefined),
+}));
 
 describe("security and copy rules", () => {
   let tempDir: string;
@@ -69,6 +81,7 @@ describe("security and copy rules", () => {
       name: "Locked target",
       mongoUrl: "mongodb://localhost:27017/locked",
       locked: true,
+      environment: "prod",
       organizationId: "org-1",
       password: "master-password",
     });
@@ -83,6 +96,7 @@ describe("security and copy rules", () => {
       name: "Source",
       mongoUrl: "mongodb://localhost:27017/source",
       locked: false,
+      environment: "prod",
       organizationId: "org-1",
       password: "master-password",
     });
@@ -90,6 +104,7 @@ describe("security and copy rules", () => {
       name: "Target",
       mongoUrl: "mongodb://localhost:27017/target",
       locked: true,
+      environment: "dev",
       organizationId: "org-1",
       password: "master-password",
     });
@@ -99,7 +114,9 @@ describe("security and copy rules", () => {
         organizationId: "org-1",
         sourceConnectionId: source!.id,
         targetConnectionId: target!.id,
-        sourceCollection: "users",
+        sourceDatabase: "source",
+        targetDatabase: "target",
+        sourceCollections: ["users"],
         mode: "override",
         password: "master-password",
       }),

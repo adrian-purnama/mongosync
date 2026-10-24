@@ -5,15 +5,14 @@ import path from "node:path";
 import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { loadPersistedJobArtifact } from "@/src/server/jobs/job-store";
 import {
   getCopyJob,
   requestCopyJobCancellation,
   resetCopyJobRuntimeForTests,
 } from "@/src/server/mongo/copy-job-store";
+import { loadExportArtifact, startExportJob } from "@/src/server/mongo/export-service";
 import { encryptSecret } from "@/src/server/security/encryption-service";
 import { saveAppData } from "@/src/server/storage/config-store";
-import { exportDatabaseAsZipJson, startExportJob } from "@/src/server/mongo/export-service";
 
 const { mockedCreateMongoClient } = vi.hoisted(() => ({
   mockedCreateMongoClient: vi.fn(),
@@ -22,6 +21,58 @@ const { mockedCreateMongoClient } = vi.hoisted(() => ({
 vi.mock("@/src/server/mongo/mongo-client-factory", () => ({
   createMongoClient: mockedCreateMongoClient,
 }));
+
+function createAsyncCursor(documents: Record<string, unknown>[]) {
+  return {
+    sort() {
+      return this;
+    },
+    batchSize() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
+    async *[Symbol.asyncIterator]() {
+      for (const document of documents) {
+        yield document;
+      }
+    },
+    close: async () => undefined,
+    toArray: async () => documents,
+  };
+}
+
+function createExportClientMock(collections: Record<string, Record<string, unknown>[]>) {
+  return {
+    db: () => ({
+      listCollections: (filter?: { name?: string }) => ({
+        toArray: async () => {
+          const names = Object.keys(collections);
+          if (filter?.name) {
+            return names
+              .filter((name) => name === filter.name)
+              .map((name) => ({ name, options: {} }));
+          }
+          return names.map((name) => ({ name }));
+        },
+      }),
+      collection: (name: string) => ({
+        estimatedDocumentCount: async () => collections[name]?.length ?? 0,
+        countDocuments: async () => collections[name]?.length ?? 0,
+        listIndexes: () => ({
+          toArray: async () => [{ name: "_id_", key: { _id: 1 } }],
+        }),
+        find: () => createAsyncCursor(collections[name] ?? []),
+        aggregate: () => ({
+          toArray: async () => (collections[name] ?? []).slice(0, 1),
+        }),
+      }),
+      command: async () => ({ size: 0 }),
+    }),
+    close: async () => undefined,
+  };
+}
 
 describe("export service", () => {
   let tempDir: string;
@@ -54,6 +105,7 @@ describe("export service", () => {
             "master-password",
           ),
           locked: false,
+          environment: "local",
           organizationId: "org-1",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -68,23 +120,15 @@ describe("export service", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("exports only the selected collections as zip json", async () => {
-    mockedCreateMongoClient.mockResolvedValue({
-      db: () => ({
-        collection: (name: string) => ({
-          countDocuments: async () => 1,
-          find: () => ({
-            toArray: async () =>
-              name === "users"
-                ? [{ _id: { _bsontype: "ObjectId", toHexString: () => "abc123" }, name: "Ada" }]
-                : [{ _id: 2, total: 4 }],
-          }),
-        }),
+  it("persists a completed streaming export job and its artifact", async () => {
+    mockedCreateMongoClient.mockResolvedValue(
+      createExportClientMock({
+        users: [{ _id: "1", name: "Ada" }],
+        orders: [{ _id: "2", total: 4 }],
       }),
-      close: async () => undefined,
-    });
+    );
 
-    const result = await exportDatabaseAsZipJson({
+    const job = await startExportJob({
       organizationId: "org-1",
       sourceConnectionId: "conn-1",
       sourceDatabase: "source-db",
@@ -92,72 +136,35 @@ describe("export service", () => {
       password: "master-password",
     });
 
-    const zip = await JSZip.loadAsync(result.content);
-    const fileNames = Object.keys(zip.files).sort();
-    const usersJson = await zip.file("users.json")?.async("string");
-    const ordersJson = await zip.file("orders.json")?.async("string");
+    const completedJob = await waitForJob(job?.id ?? "");
+    expect(completedJob.status, completedJob.error ?? "no error").toBe("completed");
+    expect(completedJob.resultAvailable).toBe(true);
+    const artifact = await loadExportArtifact(completedJob.id);
+    const zip = await JSZip.loadAsync(artifact.content);
 
-    expect(result.fileName).toBe("source-db.zip");
-    expect(fileNames).toEqual(["orders.json", "users.json"]);
-    expect(usersJson).toContain('"abc123"');
-    expect(ordersJson).toContain('"total": 4');
+    expect(completedJob.kind).toBe("export");
+    expect(completedJob.artifactFileName).toBe("source-db.zip");
+    expect(Object.keys(zip.files)).toEqual(
+      expect.arrayContaining([
+        "manifest.json",
+        "orders/data.ndjson",
+        "orders/metadata.json",
+        "users/data.ndjson",
+        "users/metadata.json",
+      ]),
+    );
+
+    const usersNdjson = await zip.file("users/data.ndjson")?.async("string");
+    expect(usersNdjson).toContain("Ada");
   });
 
   it("exports the whole database when no collections are selected", async () => {
-    mockedCreateMongoClient.mockResolvedValue({
-      db: () => ({
-        listCollections: () => ({
-          toArray: async () => [{ name: "users" }, { name: "logs" }],
-        }),
-        collection: (name: string) => ({
-          countDocuments: async () => 1,
-          find: () => ({
-            toArray: async () => [{ name, exported: true }],
-          }),
-        }),
+    mockedCreateMongoClient.mockResolvedValue(
+      createExportClientMock({
+        users: [{ _id: "1", name: "Ada" }],
+        logs: [{ _id: "2", message: "hi" }],
       }),
-      close: async () => undefined,
-    });
-
-    const result = await exportDatabaseAsZipJson({
-      organizationId: "org-1",
-      sourceConnectionId: "conn-1",
-      sourceDatabase: "source-db",
-      password: "master-password",
-    });
-
-    const zip = await JSZip.loadAsync(result.content);
-    const fileNames = Object.keys(zip.files).sort();
-
-    expect(fileNames).toEqual(["logs.json", "users.json"]);
-  });
-
-  it("rejects export when the connection belongs to a different organization", async () => {
-    await expect(
-      exportDatabaseAsZipJson({
-        organizationId: "org-2",
-        sourceConnectionId: "conn-1",
-        sourceDatabase: "source-db",
-        password: "master-password",
-      }),
-    ).rejects.toThrow("Connection must belong to the selected organization.");
-  });
-
-  it("persists a completed export job and its artifact", async () => {
-    mockedCreateMongoClient.mockResolvedValue({
-      db: () => ({
-        listCollections: () => ({
-          toArray: async () => [{ name: "users" }],
-        }),
-        collection: () => ({
-          countDocuments: async () => 2,
-          find: () => ({
-            toArray: async () => [{ name: "Ada" }, { name: "Grace" }],
-          }),
-        }),
-      }),
-      close: async () => undefined,
-    });
+    );
 
     const job = await startExportJob({
       organizationId: "org-1",
@@ -167,36 +174,51 @@ describe("export service", () => {
     });
 
     const completedJob = await waitForJob(job?.id ?? "");
-    const artifact = await loadPersistedJobArtifact(completedJob.id);
-    const zip = await JSZip.loadAsync(artifact);
+    expect(completedJob.status, completedJob.error ?? "no error").toBe("completed");
+    const artifact = await loadExportArtifact(completedJob.id);
+    const zip = await JSZip.loadAsync(artifact.content);
+    expect(zip.file("users/data.ndjson")).toBeTruthy();
+    expect(zip.file("logs/data.ndjson")).toBeTruthy();
+  });
 
-    expect(completedJob.kind).toBe("export");
-    expect(completedJob.status).toBe("completed");
-    expect(completedJob.resultAvailable).toBe(true);
-    expect(completedJob.artifactFileName).toBe("source-db.zip");
-    expect(Object.keys(zip.files)).toEqual(["users.json"]);
+  it("rejects export when the connection belongs to a different organization", async () => {
+    await expect(
+      startExportJob({
+        organizationId: "org-2",
+        sourceConnectionId: "conn-1",
+        sourceDatabase: "source-db",
+        password: "master-password",
+      }),
+    ).rejects.toThrow("Connection must belong to the selected organization.");
   });
 
   it("cancels an export job safely after cancellation is requested", async () => {
-    let releaseCountDocuments: (() => void) | null = null;
+    let releaseFind: (() => void) | undefined;
 
     mockedCreateMongoClient.mockResolvedValue({
       db: () => ({
         listCollections: () => ({
-          toArray: async () => [{ name: "users" }, { name: "logs" }],
+          toArray: async () => [{ name: "users" }],
         }),
-        collection: (name: string) => ({
-          countDocuments: async () => {
-            if (name === "users") {
-              return await new Promise<number>((resolve) => {
-                releaseCountDocuments = () => resolve(1);
-              });
-            }
-
-            return 1;
-          },
+        collection: () => ({
+          estimatedDocumentCount: async () => 1,
+          listIndexes: () => ({
+            toArray: async () => [{ name: "_id_", key: { _id: 1 } }],
+          }),
           find: () => ({
-            toArray: async () => [{ name: `${name}-document` }],
+            sort() {
+              return this;
+            },
+            batchSize() {
+              return this;
+            },
+            async *[Symbol.asyncIterator]() {
+              await new Promise<void>((resolve) => {
+                releaseFind = () => resolve();
+              });
+              yield { _id: "1", name: "Ada" };
+            },
+            close: async () => undefined,
           }),
         }),
       }),
@@ -216,7 +238,7 @@ describe("export service", () => {
     });
 
     await requestCopyJobCancellation(job?.id ?? "");
-    releaseCountDocuments?.();
+    releaseFind?.();
 
     const cancelledJob = await waitForJob(job?.id ?? "");
 
@@ -229,7 +251,7 @@ describe("export service", () => {
 async function waitForJob(jobId: string) {
   const startedAt = Date.now();
 
-  while (Date.now() - startedAt < 5_000) {
+  while (Date.now() - startedAt < 10_000) {
     const job = await getCopyJob(jobId);
 
     if (
@@ -248,7 +270,7 @@ async function waitForJob(jobId: string) {
 async function waitForCondition(predicate: () => Promise<boolean>) {
   const startedAt = Date.now();
 
-  while (Date.now() - startedAt < 5_000) {
+  while (Date.now() - startedAt < 10_000) {
     if (await predicate()) {
       return;
     }

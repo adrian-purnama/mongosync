@@ -1,11 +1,54 @@
-import { MongoClient } from "mongodb";
+import { MongoClient, type MongoClientOptions, ReadPreference } from "mongodb";
 
-export async function createMongoClient(uri: string) {
-  const client = new MongoClient(uri, {
+import {
+  MONGO_MAX_POOL_SIZE,
+  MONGO_SERVER_SELECTION_TIMEOUT_MS,
+  MONGO_SOCKET_TIMEOUT_MS,
+} from "@/src/server/mongo/copy-config";
+
+function resolveCompressors(): Array<"zstd" | "snappy" | "zlib"> {
+  const compressors: Array<"zstd" | "snappy" | "zlib"> = [];
+
+  try {
+    require("@mongodb-js/zstd");
+    compressors.push("zstd");
+  } catch {
+    // optional
+  }
+
+  try {
+    require("snappy");
+    compressors.push("snappy");
+  } catch {
+    // optional
+  }
+
+  compressors.push("zlib");
+  return compressors;
+}
+
+export type CreateMongoClientOptions = {
+  readPreference?: "primary" | "secondaryPreferred";
+};
+
+export async function createMongoClient(
+  uri: string,
+  options: CreateMongoClientOptions = {},
+) {
+  const clientOptions: MongoClientOptions = {
+    maxPoolSize: MONGO_MAX_POOL_SIZE,
+    compressors: resolveCompressors(),
+    retryReads: true,
     retryWrites: true,
-    serverSelectionTimeoutMS: 5000,
-  });
+    serverSelectionTimeoutMS: MONGO_SERVER_SELECTION_TIMEOUT_MS,
+    socketTimeoutMS: MONGO_SOCKET_TIMEOUT_MS,
+    readPreference:
+      options.readPreference === "secondaryPreferred"
+        ? ReadPreference.secondaryPreferred
+        : ReadPreference.primary,
+  };
 
+  const client = new MongoClient(uri, clientOptions);
   await client.connect();
   return client;
 }

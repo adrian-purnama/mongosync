@@ -66,7 +66,7 @@ describe("durable copy jobs", () => {
     expect(rawSnapshot).not.toContain('"id":"job-1"');
   });
 
-  it("marks running jobs as interrupted on runtime initialization", async () => {
+  it("marks running jobs as paused/resumable on runtime initialization", async () => {
     const job = await createCopyJob({
       id: "job-2",
       mode: "override",
@@ -90,8 +90,9 @@ describe("durable copy jobs", () => {
     await initializeCopyJobRuntime();
 
     const [reloadedJob] = await listPersistedJobs();
-    expect(reloadedJob?.status).toBe("interrupted");
+    expect(reloadedJob?.status).toBe("paused");
     expect(reloadedJob?.interruptedReason).toBe("process_restart");
+    expect(reloadedJob?.resumable).toBe(true);
   });
 
   it("deletes expired persisted jobs during retention cleanup", async () => {
@@ -185,7 +186,7 @@ describe("durable copy jobs", () => {
     expect(cancelledJob?.cancelRequestedAt).toBeTruthy();
   });
 
-  it("marks queued export jobs as interrupted on runtime initialization", async () => {
+  it("marks queued export jobs as paused on runtime initialization", async () => {
     await createExportJob({
       id: "job-export-1",
       organizationId: "org-1",
@@ -201,7 +202,7 @@ describe("durable copy jobs", () => {
 
     const [reloadedJob] = await listPersistedJobs();
     expect(reloadedJob?.kind).toBe("export");
-    expect(reloadedJob?.status).toBe("interrupted");
+    expect(reloadedJob?.status).toBe("paused");
     expect(reloadedJob?.interruptedReason).toBe("process_restart");
   });
 

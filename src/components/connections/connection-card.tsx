@@ -2,7 +2,19 @@
 
 import { useState } from "react";
 
-import type { Connection } from "@/src/types/models";
+import { Button } from "@/src/components/ui/button";
+import { cn } from "@/src/components/ui/cn";
+import { Alert, Badge } from "@/src/components/ui/feedback";
+import { Field, Input, Toggle } from "@/src/components/ui/field";
+import {
+  IconDatabase,
+  IconEye,
+  IconEyeOff,
+  IconLock,
+  IconPencil,
+  IconTrash,
+} from "@/src/components/ui/icons";
+import type { Connection, ConnectionEnvironment } from "@/src/types/models";
 
 type ConnectionCardProps = {
   connection: Connection;
@@ -13,6 +25,7 @@ type ConnectionCardProps = {
       name: string;
       mongoUrl?: string;
       locked: boolean;
+      environment: ConnectionEnvironment;
       organizationId: string;
     },
   ) => Promise<void>;
@@ -30,6 +43,9 @@ export function ConnectionCard({
   const [isRevealingMongoUrl, setIsRevealingMongoUrl] = useState(false);
   const [revealError, setRevealError] = useState("");
   const [locked, setLocked] = useState(connection.locked);
+  const [environment, setEnvironment] = useState<ConnectionEnvironment>(
+    connection.environment ?? "local",
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   async function handleSave() {
@@ -40,6 +56,7 @@ export function ConnectionCard({
         name,
         mongoUrl: mongoUrl || undefined,
         locked,
+        environment,
         organizationId: connection.organizationId,
       });
       setMongoUrl("");
@@ -85,111 +102,151 @@ export function ConnectionCard({
   }
 
   return (
-    <article className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold text-zinc-950">{connection.name}</h3>
-            {connection.locked ? (
-              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                Locked
-              </span>
-            ) : null}
+    <article
+      className={cn(
+        "group flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border bg-surface p-5 shadow-card transition hover:shadow-[0_6px_20px_-10px_rgb(15_26_20/0.18)]",
+        isEditing ? "border-sync ring-4 ring-sync/10" : "border-line hover:border-line-strong",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={cn(
+              "flex size-10 shrink-0 items-center justify-center rounded-xl",
+              connection.locked ? "bg-ink text-paper" : "bg-sync-wash text-sync",
+            )}
+          >
+            <IconDatabase size={18} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="truncate font-display text-[15px] font-semibold text-ink">
+                {connection.name}
+              </h3>
+              <Badge tone="neutral" className="uppercase">
+                {connection.environment ?? "local"}
+              </Badge>
+              {connection.locked ? (
+                <Badge tone="amber" icon={<IconLock size={11} />}>
+                  Locked
+                </Badge>
+              ) : null}
+            </div>
+            <p className="mt-0.5 text-xs text-subtle">
+              Updated {new Date(connection.updatedAt).toLocaleString()}
+            </p>
           </div>
-          <p className="mt-1 text-sm text-zinc-500">
-            Updated {new Date(connection.updatedAt).toLocaleString()}
-          </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-1">
           <button
             type="button"
             onClick={() => setIsEditing((current) => !current)}
-            className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 shadow-sm transition hover:bg-zinc-100"
+            aria-label={isEditing ? "Cancel editing" : "Edit connection"}
+            title={isEditing ? "Cancel" : "Edit"}
+            className={cn(
+              "flex size-8 items-center justify-center rounded-lg transition",
+              isEditing ? "bg-sync-wash text-sync" : "text-subtle hover:bg-ink/5 hover:text-ink",
+            )}
           >
-            {isEditing ? "Cancel" : "Edit"}
+            <IconPencil size={15} />
           </button>
           <button
             type="button"
             onClick={() => onDelete(connection.id)}
             disabled={connection.locked}
-            className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Delete connection"
+            title={connection.locked ? "Unlock the connection to delete it" : "Delete"}
+            className="flex size-8 items-center justify-center rounded-lg text-subtle transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-subtle"
           >
-            Delete
+            <IconTrash size={15} />
           </button>
         </div>
       </div>
 
       {isEditing ? (
-        <div className="grid gap-3">
-          <label className="grid gap-1 text-sm font-medium text-zinc-700">
-            Name
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            />
-          </label>
+        <div className="mt-5 grid animate-fade-in gap-4 border-t border-line pt-5">
+          <Field label="Name">
+            <Input value={name} onChange={(event) => setName(event.target.value)} />
+          </Field>
 
-          <label className="grid gap-1 text-sm font-medium text-zinc-700">
-            New Mongo URL
-            <input
+          <Field label="New Mongo URL" hint="Leave blank to keep the existing encrypted value.">
+            <Input
               value={mongoUrl}
               onChange={(event) => setMongoUrl(event.target.value)}
-              placeholder="Leave blank to keep existing encrypted value"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              placeholder="mongodb+srv://…"
+              className="font-mono text-[13px]"
             />
-          </label>
+          </Field>
 
-          <label className="flex items-center gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={locked}
-              onChange={(event) => setLocked(event.target.checked)}
-            />
-            Lock this connection
-          </label>
+          <Field label="Environment">
+            <select
+              value={environment}
+              onChange={(event) =>
+                setEnvironment(event.target.value as ConnectionEnvironment)
+              }
+              className="h-10 w-full rounded-[10px] border border-line bg-paper px-3 text-[13px] text-ink"
+            >
+              <option value="local">local</option>
+              <option value="dev">dev</option>
+              <option value="staging">staging</option>
+              <option value="prod">prod</option>
+            </select>
+          </Field>
 
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {isSaving ? "Saving..." : "Save changes"}
-          </button>
+          <Toggle
+            checked={locked}
+            onChange={setLocked}
+            label="Lock this connection"
+            description="Locked targets need a typed confirmation and can't be overridden."
+          />
+
+          <div className="flex justify-end gap-2">
+            <Button size="sm" onClick={() => setIsEditing(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" variant="primary" onClick={handleSave} loading={isSaving}>
+              {isSaving ? "Saving..." : "Save changes"}
+            </Button>
+          </div>
         </div>
       ) : (
-        <div className="grid gap-3 text-sm text-zinc-600">
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Saved Mongo URL
+        <div className="mt-4 grid min-w-0 gap-2">
+          <div
+            className={cn(
+              "flex min-w-0 gap-2 overflow-hidden rounded-xl border border-line bg-paper py-1.5 pl-3 pr-1.5",
+              revealedMongoUrl ? "items-start" : "items-center",
+            )}
+          >
+            <p
+              className={cn(
+                "min-w-0 flex-1 overflow-hidden font-mono text-xs text-muted",
+                revealedMongoUrl
+                  ? "max-h-24 overflow-y-auto break-all py-1 [overflow-wrap:anywhere]"
+                  : "truncate",
+              )}
+              title={
+                revealedMongoUrl ??
+                connection.mongoUrlPreview ??
+                undefined
+              }
+            >
+              {revealedMongoUrl ?? connection.mongoUrlPreview ?? "••••••••••••••••••"}
             </p>
-            <p className="break-all font-mono text-xs text-zinc-700">
-              {revealedMongoUrl ?? connection.mongoUrlPreview ?? "******************"}
-            </p>
-          </div>
-          <div className="flex gap-2">
             <button
               type="button"
               onClick={() => {
                 void handleToggleMongoUrlVisibility();
               }}
               disabled={isRevealingMongoUrl}
-              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 shadow-sm transition hover:bg-zinc-100 disabled:opacity-50"
+              aria-label={revealedMongoUrl ? "Hide URL" : "Show URL"}
+              title={revealedMongoUrl ? "Hide URL" : "Show URL"}
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-subtle transition hover:bg-surface hover:text-ink disabled:opacity-50"
             >
-              {isRevealingMongoUrl
-                ? "Loading..."
-                : revealedMongoUrl
-                  ? "Hide URL"
-                  : "Show URL"}
+              {revealedMongoUrl ? <IconEyeOff size={14} /> : <IconEye size={14} />}
             </button>
           </div>
-          {revealError ? (
-            <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
-              {revealError}
-            </p>
-          ) : null}
+          {revealError ? <Alert tone="danger">{revealError}</Alert> : null}
         </div>
       )}
     </article>

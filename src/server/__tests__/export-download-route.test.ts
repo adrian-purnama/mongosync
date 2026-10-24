@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireMasterPasswordMock = vi.fn();
 const getCopyJobMock = vi.fn();
-const loadPersistedJobArtifactMock = vi.fn();
+const loadExportArtifactMock = vi.fn();
 
 vi.mock("@/src/server/auth/auth-guard", () => ({
   requireMasterPassword: requireMasterPasswordMock,
@@ -12,8 +12,8 @@ vi.mock("@/src/server/mongo/copy-job-store", () => ({
   getCopyJob: getCopyJobMock,
 }));
 
-vi.mock("@/src/server/jobs/job-store", () => ({
-  loadPersistedJobArtifact: loadPersistedJobArtifactMock,
+vi.mock("@/src/server/mongo/export-service", () => ({
+  loadExportArtifact: loadExportArtifactMock,
 }));
 
 describe("export download route", () => {
@@ -31,7 +31,11 @@ describe("export download route", () => {
       artifactContentType: "application/zip",
       artifactFileName: "source-db.zip",
     });
-    loadPersistedJobArtifactMock.mockResolvedValue(Buffer.from("zip-binary"));
+    loadExportArtifactMock.mockResolvedValue({
+      fileName: "source-db.zip",
+      contentType: "application/zip",
+      content: Buffer.from("zip-binary"),
+    });
 
     const { GET } = await import("@/app/api/export/jobs/[id]/download/route");
     const response = await GET(new Request("http://localhost"), {

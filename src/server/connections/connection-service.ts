@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 import { decryptSecret, encryptSecret } from "@/src/server/security/encryption-service";
 import { getAppData, updateAppData } from "@/src/server/storage/config-store";
 import { AppError } from "@/src/server/utils/errors";
-import type { Connection } from "@/src/types/models";
+import type { Connection, ConnectionEnvironment } from "@/src/types/models";
 
 type CreateConnectionInput = {
   name: string;
   mongoUrl: string;
   locked: boolean;
+  environment?: ConnectionEnvironment;
   organizationId: string;
   password: string;
 };
@@ -59,6 +60,7 @@ export async function createConnection(input: CreateConnectionInput) {
       name: input.name.trim(),
       encryptedMongoUrl: encryptSecret(mongoUrl, input.password),
       locked: input.locked,
+      environment: input.environment ?? "local",
       organizationId: input.organizationId,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -102,6 +104,7 @@ export async function updateConnection(input: UpdateConnectionInput) {
         name: input.name?.trim() || connection.name,
         organizationId,
         locked: input.locked ?? connection.locked,
+        environment: input.environment ?? connection.environment ?? "local",
         encryptedMongoUrl: nextMongoUrl
           ? encryptSecret(nextMongoUrl, input.password!)
           : connection.encryptedMongoUrl,

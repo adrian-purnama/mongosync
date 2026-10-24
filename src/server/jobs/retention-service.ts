@@ -25,7 +25,13 @@ async function runJobRetentionCleanupInternal(force: boolean) {
       return false;
     }
 
-    if (job.status === "running" || job.status === "queued") {
+    if (
+      job.status === "running" ||
+      job.status === "queued" ||
+      job.status === "paused" ||
+      job.status === "verifying" ||
+      job.status === "swapping"
+    ) {
       return false;
     }
 

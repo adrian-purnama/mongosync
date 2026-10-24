@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+
+import { cn } from "@/src/components/ui/cn";
+import { IconCheck, IconChevronDown, IconSearch } from "@/src/components/ui/icons";
 
 type DropdownOption = {
   value: string;
@@ -14,23 +17,40 @@ type SearchableDropdownProps = {
   placeholder: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  icon?: ReactNode;
+  hideLabel?: boolean;
 };
 
-export function SearchableDropdown({
-  label,
-  value,
-  options,
-  placeholder,
-  onChange,
-  disabled = false,
-}: SearchableDropdownProps) {
+const triggerClass =
+  "flex h-10 w-full items-center gap-2.5 rounded-[10px] border border-line bg-surface px-3 text-left text-sm shadow-card transition hover:border-line-strong disabled:cursor-not-allowed disabled:bg-paper disabled:shadow-none";
+
+const panelClass =
+  "absolute z-30 mt-1.5 w-full min-w-56 animate-pop-in overflow-hidden rounded-xl border border-line bg-surface shadow-pop";
+
+function useOutsideClose(onClose: () => void) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const onCloseRef = useRef(onClose);
 
-  const selectedOption = options.find((option) => option.value === value) ?? null;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
-  const filteredOptions = useMemo(() => {
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        onCloseRef.current();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  return containerRef;
+}
+
+function useFilteredOptions(options: DropdownOption[], query: string) {
+  return useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
     if (!normalizedQuery) {
@@ -41,25 +61,99 @@ export function SearchableDropdown({
       option.label.toLowerCase().includes(normalizedQuery),
     );
   }, [options, query]);
+}
 
-  useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setQuery("");
-        setIsOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
+function SearchBox({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-      {label}
+    <div className="flex items-center gap-2 border-b border-line px-3">
+      <IconSearch className="text-subtle" />
+      <input
+        autoFocus
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={`Search ${label.toLowerCase()}`}
+        className="h-10 w-full bg-transparent text-sm text-ink outline-none placeholder:text-subtle"
+      />
+    </div>
+  );
+}
+
+function Trigger({
+  disabled,
+  isOpen,
+  onClick,
+  icon,
+  filled,
+  children,
+  label,
+}: {
+  disabled: boolean;
+  isOpen: boolean;
+  onClick: () => void;
+  icon?: ReactNode;
+  filled: boolean;
+  children: ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-haspopup="listbox"
+      aria-expanded={isOpen}
+      aria-label={label}
+      className={cn(triggerClass, isOpen && "border-sync ring-4 ring-sync/12")}
+    >
+      {icon ? <span className="shrink-0 text-subtle">{icon}</span> : null}
+      <span className={cn("min-w-0 flex-1 truncate", filled ? "text-ink" : "text-subtle")}>
+        {children}
+      </span>
+      <IconChevronDown
+        className={cn("shrink-0 text-subtle transition-transform", isOpen && "rotate-180")}
+      />
+    </button>
+  );
+}
+
+export function SearchableDropdown({
+  label,
+  value,
+  options,
+  placeholder,
+  onChange,
+  disabled = false,
+  icon,
+  hideLabel = false,
+}: SearchableDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const containerRef = useOutsideClose(() => {
+    setQuery("");
+    setIsOpen(false);
+  });
+
+  const selectedOption = options.find((option) => option.value === value) ?? null;
+  const filteredOptions = useFilteredOptions(options, query);
+
+  return (
+    <div className="grid gap-1.5">
+      {hideLabel ? null : <span className="text-[13px] font-medium text-ink">{label}</span>}
       <div ref={containerRef} className="relative">
-        <button
-          type="button"
+        <Trigger
+          label={label}
           disabled={disabled}
+          isOpen={isOpen}
+          icon={icon}
+          filled={Boolean(selectedOption)}
           onClick={() =>
             setIsOpen((current) => {
               const next = !current;
@@ -71,49 +165,48 @@ export function SearchableDropdown({
               return next;
             })
           }
-          className="flex w-full items-center justify-between rounded-md border border-zinc-300 bg-white px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:bg-zinc-100"
         >
-          <span className={selectedOption ? "text-zinc-950" : "text-zinc-400"}>
-            {selectedOption?.label ?? placeholder}
-          </span>
-          <span className="text-zinc-400">{isOpen ? "▲" : "▼"}</span>
-        </button>
+          {selectedOption?.label ?? placeholder}
+        </Trigger>
 
         {isOpen ? (
-          <div className="absolute z-20 mt-2 w-full rounded-xl border border-zinc-300 bg-white p-2 shadow-xl">
-            <div className="border-b border-zinc-200 pb-2">
-              <input
-                autoFocus
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={`Search ${label.toLowerCase()}`}
-                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="mt-2 max-h-64 overflow-auto">
+          <div className={panelClass}>
+            <SearchBox label={label} value={query} onChange={setQuery} />
+            <div role="listbox" className="scrollbar-thin max-h-64 overflow-auto p-1.5">
               {filteredOptions.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-zinc-500">No results found.</div>
+                <div className="px-3 py-6 text-center text-[13px] text-subtle">
+                  No results found.
+                </div>
               ) : (
-                filteredOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => {
-                      onChange(option.value);
-                      setQuery("");
-                      setIsOpen(false);
-                    }}
-                    className="block w-full rounded-md border border-transparent px-3 py-2 text-left text-sm text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-100"
-                  >
-                    {option.label}
-                  </button>
-                ))
+                filteredOptions.map((option) => {
+                  const selected = option.value === value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => {
+                        onChange(option.value);
+                        setQuery("");
+                        setIsOpen(false);
+                      }}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition",
+                        selected ? "bg-sync-wash text-sync-strong" : "text-ink hover:bg-paper",
+                      )}
+                    >
+                      <span className="truncate">{option.label}</span>
+                      {selected ? <IconCheck className="shrink-0" /> : null}
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>
         ) : null}
       </div>
-    </label>
+    </div>
   );
 }
 
@@ -124,6 +217,7 @@ type MultiSearchableDropdownProps = {
   placeholder: string;
   onChange: (values: string[]) => void;
   disabled?: boolean;
+  icon?: ReactNode;
 };
 
 export function MultiSearchableDropdown({
@@ -133,40 +227,22 @@ export function MultiSearchableDropdown({
   placeholder,
   onChange,
   disabled = false,
+  icon,
 }: MultiSearchableDropdownProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
-
-  const filteredOptions = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return options;
-    }
-
-    return options.filter((option) =>
-      option.label.toLowerCase().includes(normalizedQuery),
-    );
-  }, [options, query]);
-
-  useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setQuery("");
-        setIsOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
+  const containerRef = useOutsideClose(() => {
+    setQuery("");
+    setIsOpen(false);
+  });
+  const filteredOptions = useFilteredOptions(options, query);
 
   const summary =
     values.length === 0
       ? placeholder
       : values.length === 1
         ? options.find((option) => option.value === values[0])?.label ?? values[0]
-        : `${values.length} selected`;
+        : `${values.length} collections selected`;
 
   function toggleValue(nextValue: string) {
     onChange(
@@ -177,35 +253,28 @@ export function MultiSearchableDropdown({
   }
 
   return (
-    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-      {label}
+    <div className="grid gap-1.5">
+      <span className="text-[13px] font-medium text-ink">{label}</span>
       <div ref={containerRef} className="relative">
-        <button
-          type="button"
+        <Trigger
+          label={label}
           disabled={disabled}
+          isOpen={isOpen}
+          icon={icon}
+          filled={values.length > 0}
           onClick={() => setIsOpen((current) => !current)}
-          className="flex w-full items-center justify-between rounded-md border border-zinc-300 bg-white px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:bg-zinc-100"
         >
-          <span className={values.length > 0 ? "text-zinc-950" : "text-zinc-400"}>
-            {summary}
-          </span>
-          <span className="text-zinc-400">{isOpen ? "▲" : "▼"}</span>
-        </button>
+          {summary}
+        </Trigger>
 
         {isOpen ? (
-          <div className="absolute z-20 mt-2 w-full rounded-xl border border-zinc-300 bg-white p-2 shadow-xl">
-            <div className="border-b border-zinc-200 pb-2">
-              <input
-                autoFocus
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={`Search ${label.toLowerCase()}`}
-                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="mt-2 max-h-64 overflow-auto">
+          <div className={panelClass}>
+            <SearchBox label={label} value={query} onChange={setQuery} />
+            <div role="listbox" aria-multiselectable className="scrollbar-thin max-h-64 overflow-auto p-1.5">
               {filteredOptions.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-zinc-500">No results found.</div>
+                <div className="px-3 py-6 text-center text-[13px] text-subtle">
+                  No results found.
+                </div>
               ) : (
                 filteredOptions.map((option) => {
                   const checked = values.includes(option.value);
@@ -213,11 +282,20 @@ export function MultiSearchableDropdown({
                     <button
                       key={option.value}
                       type="button"
+                      role="option"
+                      aria-selected={checked}
                       onClick={() => toggleValue(option.value)}
-                      className="flex w-full items-center gap-2 rounded-md border border-transparent px-3 py-2 text-left text-sm text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-100"
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-ink transition hover:bg-paper"
                     >
-                      <input type="checkbox" checked={checked} readOnly />
-                      <span>{option.label}</span>
+                      <span
+                        className={cn(
+                          "flex size-4 shrink-0 items-center justify-center rounded-[5px] border transition",
+                          checked ? "border-sync bg-sync text-white" : "border-line-strong bg-surface",
+                        )}
+                      >
+                        {checked ? <IconCheck size={12} strokeWidth={3} /> : null}
+                      </span>
+                      <span className="truncate">{option.label}</span>
                     </button>
                   );
                 })
@@ -226,6 +304,6 @@ export function MultiSearchableDropdown({
           </div>
         ) : null}
       </div>
-    </label>
+    </div>
   );
 }

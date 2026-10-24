@@ -12,10 +12,14 @@
     "electron:start": "electron .",
     "dist:win": "npm run build && electron-builder --win portable --config.win.signAndEditExecutable=false",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench:copy": "tsx scripts/bench-copy.ts"
   },
   "dependencies": {
+    "@types/archiver": "^8.0.0",
+    "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
+    "bson": "^7.3.3",
     "cookie": "^1.1.1",
     "jszip": "^3.10.1",
     "mongodb": "^7.1.1",
@@ -33,7 +37,9 @@
     "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "mongodb-memory-server": "^11.3.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^4.1.2"
   },
@@ -64,5 +70,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "optionalDependencies": {
+    "@mongodb-js/zstd": "^7.0.0",
+    "snappy": "^7.4.3"
   }
 }

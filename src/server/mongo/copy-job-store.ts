@@ -2,7 +2,19 @@ import {
   COPY_LOG_LIMIT,
   JOB_RUNTIME_CACHE_LIMIT,
 } from "@/src/server/config/constants";
-import { createJobLog, listPersistedJobs, persistJobSnapshot, appendPersistedJobLog, loadPersistedJob } from "@/src/server/jobs/job-store";
+import { JOB_PERSIST_INTERVAL_MS } from "@/src/server/mongo/copy-config";
+import {
+  abortJob,
+  clearJobAbortController,
+  resetJobAbortControllersForTests,
+} from "@/src/server/mongo/job-runtime";
+import {
+  createJobLog,
+  listPersistedJobs,
+  persistJobSnapshot,
+  appendPersistedJobLog,
+  loadPersistedJob,
+} from "@/src/server/jobs/job-store";
 import { runJobRetentionCleanup } from "@/src/server/jobs/retention-service";
 import type {
   CopyJob,
@@ -10,9 +22,15 @@ import type {
   JobKind,
   CopyJobLogLevel,
   CopyMode,
+  CollectionCheckpoint,
+  SwapStep,
+  JobLockInfo,
 } from "@/src/types/models";
 
 const jobs = new Map<string, CopyJob>();
+const dirtyJobIds = new Set<string>();
+const lastDiskPersistAt = new Map<string, number>();
+let persistTimer: ReturnType<typeof setInterval> | null = null;
 let initializationPromise: Promise<void> | null = null;
 
 type CreateJobInput = {
@@ -32,9 +50,35 @@ type CreateJobInput = {
   artifactStoredAt?: string | null;
   artifactContentType?: string | null;
   resultAvailable?: boolean;
+  filter?: Record<string, unknown> | null;
+  limit?: number | null;
+  checkpoints?: CollectionCheckpoint[];
+  swapSteps?: SwapStep[];
+  journalCollection?: string | null;
 };
 
 type CreateCopyJobInput = Omit<CreateJobInput, "kind">;
+
+const TERMINAL_STATUSES = new Set<CopyJob["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+  "reverted",
+  "interrupted",
+]);
+
+const STATUS_CHANGE_FORCE_PERSIST = new Set<CopyJob["status"]>([
+  "queued",
+  "running",
+  "paused",
+  "verifying",
+  "swapping",
+  "completed",
+  "failed",
+  "cancelled",
+  "reverted",
+  "interrupted",
+]);
 
 function setCachedJob(job: CopyJob) {
   jobs.set(job.id, {
@@ -52,6 +96,69 @@ function setCachedJob(job: CopyJob) {
   }
 }
 
+function ensurePersistTimer() {
+  if (persistTimer) {
+    return;
+  }
+
+  persistTimer = setInterval(() => {
+    void flushDirtyJobs();
+  }, JOB_PERSIST_INTERVAL_MS);
+  persistTimer.unref?.();
+}
+
+async function flushDirtyJobs() {
+  const ids = [...dirtyJobIds];
+  dirtyJobIds.clear();
+
+  for (const jobId of ids) {
+    const job = jobs.get(jobId);
+    if (!job) {
+      continue;
+    }
+
+    try {
+      const persisted = await persistJobSnapshot(job);
+      lastDiskPersistAt.set(jobId, Date.now());
+      setCachedJob({
+        ...persisted,
+        logs: job.logs,
+      });
+    } catch {
+      dirtyJobIds.add(jobId);
+    }
+  }
+}
+
+const persistChains = new Map<string, Promise<unknown>>();
+
+async function persistNow(job: CopyJob) {
+  const previous = persistChains.get(job.id) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const persisted = await persistJobSnapshot(job);
+      lastDiskPersistAt.set(job.id, Date.now());
+      dirtyJobIds.delete(job.id);
+      setCachedJob({
+        ...persisted,
+        logs: job.logs,
+      });
+      return persisted;
+    });
+
+  persistChains.set(
+    job.id,
+    next.finally(() => {
+      if (persistChains.get(job.id) === next) {
+        persistChains.delete(job.id);
+      }
+    }),
+  );
+
+  return next;
+}
+
 async function initializeRuntimeInternal() {
   await runJobRetentionCleanup();
   const persistedJobs = await listPersistedJobs();
@@ -62,21 +169,52 @@ async function initializeRuntimeInternal() {
     }
 
     if (persistedJob.status === "running" || persistedJob.status === "queued") {
-      const interruptedJob = {
+      const pausedJob: CopyJob = {
         ...persistedJob,
-        status: "interrupted" as const,
+        status: "paused",
+        resumable: true,
         interruptedReason: "process_restart" as CopyJobInterruptionReason,
-        error: persistedJob.error ?? "Job interrupted because the server process restarted.",
-        completedAt: persistedJob.completedAt ?? new Date().toISOString(),
+        error:
+          persistedJob.error ??
+          "Job paused because the server process restarted. You can resume.",
+        completedAt: null,
       };
 
-      const persistedInterruptedJob = await persistJobSnapshot(interruptedJob);
-      setCachedJob(persistedInterruptedJob);
+      const persistedPausedJob = await persistJobSnapshot(pausedJob);
+      setCachedJob(persistedPausedJob);
+      continue;
+    }
+
+    if (persistedJob.status === "interrupted") {
+      const migrated: CopyJob = {
+        ...persistedJob,
+        status: "paused",
+        resumable: Boolean(persistedJob.checkpoints?.length),
+      };
+      setCachedJob(migrated);
+      continue;
+    }
+
+    if (persistedJob.status === "verifying" || persistedJob.status === "swapping") {
+      const pausedJob: CopyJob = {
+        ...persistedJob,
+        status: "paused",
+        resumable: true,
+        interruptedReason: "process_restart",
+        error:
+          persistedJob.error ??
+          "Job paused mid-finalize because the server process restarted. Resume to finish or revert.",
+        completedAt: null,
+      };
+      const persistedPausedJob = await persistJobSnapshot(pausedJob);
+      setCachedJob(persistedPausedJob);
       continue;
     }
 
     setCachedJob(persistedJob);
   }
+
+  ensurePersistTimer();
 }
 
 export async function initializeCopyJobRuntime() {
@@ -105,6 +243,7 @@ async function createJob(input: CreateJobInput) {
     sourceCollections: input.sourceCollections,
     targetCollections: input.targetCollections ?? null,
     processedDocuments: 0,
+    processedBytes: 0,
     totalDocuments: null,
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -113,6 +252,14 @@ async function createJob(input: CreateJobInput) {
     lastPersistedAt: null,
     retentionExpiresAt: null,
     interruptedReason: null,
+    resumable: input.kind === "copy" || input.kind === "import",
+    checkpoints: input.checkpoints ?? [],
+    swapSteps: input.swapSteps ?? [],
+    journalCollection: input.journalCollection ?? null,
+    lock: null,
+    backupBytesEstimate: null,
+    filter: input.filter ?? null,
+    limit: input.limit ?? null,
     artifactFileName: input.artifactFileName ?? null,
     artifactStoredAt: input.artifactStoredAt ?? null,
     artifactContentType: input.artifactContentType ?? null,
@@ -121,8 +268,7 @@ async function createJob(input: CreateJobInput) {
     persistenceSource: "memory",
   };
 
-  const persistedJob = await persistJobSnapshot(job);
-  setCachedJob(persistedJob);
+  const persistedJob = await persistNow(job);
   return persistedJob;
 }
 
@@ -168,7 +314,13 @@ export async function listCopyJobs() {
 
 export async function listActiveCopyJobs() {
   const allJobs = await listCopyJobs();
-  return allJobs.filter((job) => job.status === "queued" || job.status === "running");
+  return allJobs.filter(
+    (job) =>
+      job.status === "queued" ||
+      job.status === "running" ||
+      job.status === "verifying" ||
+      job.status === "swapping",
+  );
 }
 
 export async function createExportJob(
@@ -190,9 +342,20 @@ export async function createExportJob(
   });
 }
 
+export async function createImportJob(
+  input: Omit<CreateJobInput, "kind"> & { mode?: CopyMode },
+) {
+  return createJob({
+    ...input,
+    kind: "import",
+    mode: input.mode ?? "override",
+  });
+}
+
 export async function updateCopyJob(
   jobId: string,
   updater: (job: CopyJob) => CopyJob,
+  options?: { forcePersist?: boolean },
 ) {
   await initializeCopyJobRuntime();
   const current = await getCopyJob(jobId);
@@ -202,12 +365,31 @@ export async function updateCopyJob(
   }
 
   const next = updater(current);
-  const persistedJob = await persistJobSnapshot(next);
-  setCachedJob({
-    ...persistedJob,
-    logs: next.logs,
-  });
-  return persistedJob;
+  const statusChanged = next.status !== current.status;
+  const force =
+    options?.forcePersist ||
+    statusChanged ||
+    STATUS_CHANGE_FORCE_PERSIST.has(next.status);
+
+  setCachedJob(next);
+
+  if (force) {
+    return persistNow(next);
+  }
+
+  dirtyJobIds.add(jobId);
+  ensurePersistTimer();
+
+  const last = lastDiskPersistAt.get(jobId) ?? 0;
+  if (Date.now() - last >= JOB_PERSIST_INTERVAL_MS) {
+    return persistNow(next);
+  }
+
+  return next;
+}
+
+export async function setJobLockInfo(jobId: string, lock: JobLockInfo | null) {
+  return updateCopyJob(jobId, (job) => ({ ...job, lock }), { forcePersist: true });
 }
 
 export async function requestCopyJobCancellation(jobId: string) {
@@ -218,18 +400,23 @@ export async function requestCopyJobCancellation(jobId: string) {
     return null;
   }
 
-  if (
-    current.status === "completed" ||
-    current.status === "failed" ||
-    current.status === "interrupted" ||
-    current.status === "cancelled"
-  ) {
-    return current;
+  if (TERMINAL_STATUSES.has(current.status) && current.status !== "paused") {
+    if (
+      current.status === "completed" ||
+      current.status === "failed" ||
+      current.status === "interrupted" ||
+      current.status === "cancelled" ||
+      current.status === "reverted"
+    ) {
+      return current;
+    }
   }
+
+  abortJob(jobId);
 
   const cancellationRequestedAt = current.cancelRequestedAt ?? new Date().toISOString();
   const next =
-    current.status === "queued"
+    current.status === "queued" || current.status === "paused"
       ? {
           ...current,
           status: "cancelled" as const,
@@ -237,22 +424,24 @@ export async function requestCopyJobCancellation(jobId: string) {
           interruptedReason: "user_cancelled" as const,
           completedAt: new Date().toISOString(),
           error: null,
+          resumable: false,
         }
       : {
           ...current,
           cancelRequestedAt: cancellationRequestedAt,
         };
 
-  const persistedJob = await persistJobSnapshot(next);
-  setCachedJob({
-    ...persistedJob,
-    logs: current.logs,
-  });
+  await persistNow(next);
 
-  if (current.status === "queued") {
-    await addCopyJobLog(jobId, "warning", "Job cancelled before execution started.");
+  if (current.status === "queued" || current.status === "paused") {
+    await addCopyJobLog(jobId, "warning", "Job cancelled.");
+    clearJobAbortController(jobId);
   } else if (!current.cancelRequestedAt) {
-    await addCopyJobLog(jobId, "warning", "Cancellation requested. Finishing the current safe step.");
+    await addCopyJobLog(
+      jobId,
+      "warning",
+      "Cancellation requested. Finishing the current safe step.",
+    );
   }
 
   return getCopyJob(jobId);
@@ -279,15 +468,24 @@ export async function addCopyJobLog(
     logs: [...current.logs, nextLog].slice(-COPY_LOG_LIMIT),
   };
 
-  const persistedJob = await persistJobSnapshot(next);
-  setCachedJob({
-    ...persistedJob,
-    logs: next.logs,
-  });
+  setCachedJob(next);
+  dirtyJobIds.add(jobId);
+  ensurePersistTimer();
   return nextLog;
 }
 
 export function resetCopyJobRuntimeForTests() {
   jobs.clear();
+  dirtyJobIds.clear();
+  lastDiskPersistAt.clear();
   initializationPromise = null;
+  if (persistTimer) {
+    clearInterval(persistTimer);
+    persistTimer = null;
+  }
+  resetJobAbortControllersForTests();
+}
+
+export async function flushJobPersistenceForTests() {
+  await flushDirtyJobs();
 }

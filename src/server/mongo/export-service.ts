@@ -1,17 +1,40 @@
 import { randomUUID } from "node:crypto";
-import JSZip from "jszip";
-import type { Document } from "mongodb";
+import { readFile, rm } from "node:fs/promises";
 
-import { decryptConnectionUrl, getConnectionById } from "@/src/server/connections/connection-service";
-import { persistJobArtifact } from "@/src/server/jobs/job-store";
+import {
+  decryptConnectionUrl,
+  getConnectionById,
+} from "@/src/server/connections/connection-service";
+import { APP_NAME } from "@/src/server/config/constants";
 import { AppError } from "@/src/server/utils/errors";
 import {
   addCopyJobLog,
   createExportJob,
+  createImportJob,
   getCopyJob,
   updateCopyJob,
 } from "./copy-job-store";
+import {
+  clearJobAbortController,
+  getOrCreateJobAbortController,
+} from "./job-runtime";
 import { createMongoClient } from "./mongo-client-factory";
+import {
+  detectMongodumpOnPath,
+  estimateExportDocuments,
+  ExportCancellationError,
+  getExportArtifactFilePath,
+  listExportableCollections,
+  runMongodumpExport,
+  sanitizeExportFileName,
+  streamExportDatabaseToZip,
+} from "./export/stream-export";
+import { streamImportZip } from "./export/stream-import";
+import {
+  acquireJobLock,
+  type AcquiredLock,
+} from "./lock/job-lock";
+import { CancellationRequestedError } from "./copy/engine";
 
 type ExportDatabaseInput = {
   organizationId: string;
@@ -19,6 +42,15 @@ type ExportDatabaseInput = {
   sourceDatabase: string;
   sourceCollections?: string[];
   password: string;
+  useMongodump?: boolean;
+};
+
+type ImportZipInput = {
+  organizationId: string;
+  targetConnectionId: string;
+  targetDatabase: string;
+  password: string;
+  filePath: string;
 };
 
 export async function startExportJob(input: ExportDatabaseInput) {
@@ -48,7 +80,7 @@ export async function startExportJob(input: ExportDatabaseInput) {
     sourceDatabase: input.sourceDatabase,
     sourceCollection: sourceCollectionSummary,
     sourceCollections,
-    artifactFileName: `${sanitizeFileName(input.sourceDatabase)}.zip`,
+    artifactFileName: `${sanitizeExportFileName(input.sourceDatabase)}.zip`,
   });
 
   void runExportJob({
@@ -61,49 +93,6 @@ export async function startExportJob(input: ExportDatabaseInput) {
   return getCopyJob(jobId);
 }
 
-export async function exportDatabaseAsZipJson(input: ExportDatabaseInput) {
-  const sourceConnection = await getConnectionById(input.sourceConnectionId);
-
-  if (!sourceConnection) {
-    throw new AppError("Source connection was not found.", 404);
-  }
-
-  if (sourceConnection.organizationId !== input.organizationId) {
-    throw new AppError("Connection must belong to the selected organization.");
-  }
-
-  const sourceUri = decryptConnectionUrl(sourceConnection, input.password);
-  const client = await createMongoClient(sourceUri);
-
-  try {
-    const db = client.db(input.sourceDatabase);
-    const selectedCollections = input.sourceCollections?.filter(Boolean) ?? [];
-    const collectionNames =
-      selectedCollections.length > 0
-        ? selectedCollections
-        : (await db.listCollections({}, { nameOnly: true }).toArray())
-            .map((collection) => collection.name)
-            .sort();
-
-    if (collectionNames.length === 0) {
-      throw new AppError("No collections found to export.", 404);
-    }
-
-    const totalDocuments = await countDocuments(db, collectionNames);
-    const zip = await buildExportZip(db, collectionNames);
-    const fileName = `${sanitizeFileName(input.sourceDatabase)}.zip`;
-    const content = await zip.generateAsync({ type: "uint8array" });
-
-    return {
-      fileName,
-      content,
-      totalDocuments,
-    };
-  } finally {
-    await client.close();
-  }
-}
-
 async function runExportJob(
   input: ExportDatabaseInput & {
     jobId: string;
@@ -112,7 +101,11 @@ async function runExportJob(
   },
 ) {
   const sourceUri = decryptConnectionUrl(input.sourceConnection, input.password);
-  const client = await createMongoClient(sourceUri);
+  const client = await createMongoClient(sourceUri, {
+    readPreference: "secondaryPreferred",
+  });
+  const controller = getOrCreateJobAbortController(input.jobId);
+  const outputPath = getExportArtifactFilePath(input.jobId);
 
   try {
     const startingJob = await getCopyJob(input.jobId);
@@ -120,220 +113,307 @@ async function runExportJob(
       return;
     }
 
-    await updateCopyJob(input.jobId, (job) => ({
-      ...job,
-      status: "running",
-      interruptedReason: null,
-      error: null,
-    }));
+    await updateCopyJob(
+      input.jobId,
+      (job) => ({
+        ...job,
+        status: "running",
+        interruptedReason: null,
+        error: null,
+      }),
+      { forcePersist: true },
+    );
     await addCopyJobLog(input.jobId, "info", "Source connection established.");
 
     const db = client.db(input.sourceDatabase);
-    const collectionNames =
-      input.sourceCollections.length > 0
-        ? input.sourceCollections
-        : (await db.listCollections({}, { nameOnly: true }).toArray())
-            .map((collection) => collection.name)
-            .sort();
+    const collectionNames = await listExportableCollections(db, input.sourceCollections);
 
     if (collectionNames.length === 0) {
       throw new AppError("No collections found to export.", 404);
     }
 
-    await throwIfCancellationRequested(input.jobId);
-    const totalDocuments = await countDocuments(db, collectionNames);
-    await updateCopyJob(input.jobId, (job) => ({
-      ...job,
-      totalDocuments,
-      sourceCollections: collectionNames,
-      sourceCollection:
-        collectionNames.length === 1
-          ? collectionNames[0]
-          : `${collectionNames.length} collections`,
-    }));
+    const totalDocuments = await estimateExportDocuments(db, collectionNames);
+    await updateCopyJob(
+      input.jobId,
+      (job) => ({
+        ...job,
+        totalDocuments,
+        sourceCollections: collectionNames,
+        sourceCollection:
+          collectionNames.length === 1
+            ? collectionNames[0]
+            : `${collectionNames.length} collections`,
+      }),
+      { forcePersist: true },
+    );
     await addCopyJobLog(
       input.jobId,
       "info",
-      `Preparing export for ${collectionNames.length} collection(s) and ${totalDocuments} document(s).`,
+      `Preparing export for ${collectionNames.length} collection(s) (~${totalDocuments} document(s)).`,
     );
 
-    let processedDocuments = 0;
-    const zip = await buildExportZip(db, collectionNames, async (processedIncrement, collectionName) => {
-      await throwIfCancellationRequested(input.jobId);
-      processedDocuments += processedIncrement;
-      await updateCopyJob(input.jobId, (job) => ({
-        ...job,
-        processedDocuments,
-      }));
-      await addCopyJobLog(
+    if (input.useMongodump) {
+      await runMongodumpExport({
+        mongoUri: sourceUri,
+        databaseName: input.sourceDatabase,
+        outputPath,
+        signal: controller.signal,
+      });
+      await updateCopyJob(
         input.jobId,
-        "info",
-        `Exported ${processedIncrement} document(s) from ${collectionName}.`,
+        (job) => ({
+          ...job,
+          status: "completed",
+          processedDocuments: totalDocuments,
+          completedAt: new Date().toISOString(),
+          artifactStoredAt: new Date().toISOString(),
+          resultAvailable: true,
+          artifactContentType: "application/gzip",
+          artifactFileName: `${sanitizeExportFileName(input.sourceDatabase)}.archive.gz`,
+        }),
+        { forcePersist: true },
       );
-    });
-    await throwIfCancellationRequested(input.jobId);
-    const artifactContent = await zip.generateAsync({ type: "uint8array" });
-    await persistJobArtifact(input.jobId, artifactContent);
+      await addCopyJobLog(input.jobId, "info", "mongodump export completed.");
+      return;
+    }
 
-    await updateCopyJob(input.jobId, (job) => ({
-      ...job,
-      status: "completed",
-      processedDocuments,
-      completedAt: new Date().toISOString(),
-      artifactStoredAt: new Date().toISOString(),
-      resultAvailable: true,
-    }));
+    let lastProgressWrite = 0;
+    await streamExportDatabaseToZip({
+      client,
+      databaseName: input.sourceDatabase,
+      collectionNames,
+      connectionLabel: input.sourceConnection.name,
+      appVersion: APP_NAME,
+      outputPath,
+      signal: controller.signal,
+      onProgress: async ({ processedDocuments, processedBytes }) => {
+        const now = Date.now();
+        if (now - lastProgressWrite < 500) {
+          return;
+        }
+        lastProgressWrite = now;
+        await updateCopyJob(input.jobId, (job) => ({
+          ...job,
+          processedDocuments,
+          processedBytes,
+        }));
+      },
+    });
+
+    await updateCopyJob(
+      input.jobId,
+      (job) => ({
+        ...job,
+        status: "completed",
+        processedDocuments: totalDocuments,
+        completedAt: new Date().toISOString(),
+        artifactStoredAt: new Date().toISOString(),
+        resultAvailable: true,
+        artifactContentType: "application/zip",
+      }),
+      { forcePersist: true },
+    );
     await addCopyJobLog(input.jobId, "info", "Export job completed.");
   } catch (error) {
-    if (error instanceof CancellationRequestedError) {
-      await updateCopyJob(input.jobId, (job) => ({
-        ...job,
-        status: "cancelled",
-        interruptedReason: "user_cancelled",
-        completedAt: new Date().toISOString(),
-        error: null,
-      }));
+    if (
+      error instanceof ExportCancellationError ||
+      error instanceof CancellationRequestedError ||
+      controller.signal.aborted
+    ) {
+      await rm(outputPath, { force: true }).catch(() => undefined);
+      await rm(`${outputPath}.partial`, { force: true }).catch(() => undefined);
+      await updateCopyJob(
+        input.jobId,
+        (job) => ({
+          ...job,
+          status: "cancelled",
+          interruptedReason: "user_cancelled",
+          completedAt: new Date().toISOString(),
+          error: null,
+          resultAvailable: false,
+        }),
+        { forcePersist: true },
+      );
       await addCopyJobLog(input.jobId, "warning", "Export job cancelled safely.");
       return;
     }
 
-    await updateCopyJob(input.jobId, (job) => ({
-      ...job,
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
-      completedAt: new Date().toISOString(),
-    }));
+    await rm(outputPath, { force: true }).catch(() => undefined);
+    await rm(`${outputPath}.partial`, { force: true }).catch(() => undefined);
+    await updateCopyJob(
+      input.jobId,
+      (job) => ({
+        ...job,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+        completedAt: new Date().toISOString(),
+        resultAvailable: false,
+      }),
+      { forcePersist: true },
+    );
     await addCopyJobLog(
       input.jobId,
       "error",
       error instanceof Error ? error.message : "Unknown error",
     );
   } finally {
+    clearJobAbortController(input.jobId);
     await client.close();
   }
 }
 
-async function countDocuments(
-  db: {
-    collection: (
-      name: string,
-    ) => {
-      countDocuments?: (filter: Record<string, never>) => Promise<number>;
-      find: (filter: Record<string, never>) => { toArray: () => Promise<Document[]> };
-    };
-  },
-  collectionNames: string[],
-) {
-  let totalDocuments = 0;
-
-  for (const collectionName of collectionNames) {
-    const collection = db.collection(collectionName);
-    if (collection.countDocuments) {
-      totalDocuments += await collection.countDocuments({});
-      continue;
-    }
-
-    totalDocuments += (await collection.find({}).toArray()).length;
-  }
-
-  return totalDocuments;
-}
-
-async function buildExportZip(
-  db: {
-    collection: (name: string) => { find: (filter: Record<string, never>) => { toArray: () => Promise<Document[]> } };
-  },
-  collectionNames: string[],
-  onCollectionExported?: (processedIncrement: number, collectionName: string) => Promise<void>,
-) {
-  const zip = new JSZip();
-
-  for (const collectionName of collectionNames) {
-    const documents = await db.collection(collectionName).find({}).toArray();
-    const serializedDocuments = documents.map((document) => toJsonSafeValue(document));
-    zip.file(`${collectionName}.json`, JSON.stringify(serializedDocuments, null, 2));
-
-    if (onCollectionExported) {
-      await onCollectionExported(documents.length, collectionName);
-    }
-  }
-
-  return zip;
-}
-
-class CancellationRequestedError extends Error {
-  constructor() {
-    super("Job cancellation requested.");
-  }
-}
-
-async function throwIfCancellationRequested(jobId: string) {
+export async function loadExportArtifact(jobId: string) {
   const job = await getCopyJob(jobId);
+  if (!job || job.kind !== "export" || !job.resultAvailable) {
+    throw new AppError("Export artifact is not available.", 404);
+  }
 
-  if (job?.cancelRequestedAt) {
-    throw new CancellationRequestedError();
+  const filePath = getExportArtifactFilePath(jobId);
+  try {
+    return {
+      fileName: job.artifactFileName ?? `${jobId}.zip`,
+      contentType: job.artifactContentType ?? "application/zip",
+      content: await readFile(filePath),
+    };
+  } catch {
+    throw new AppError("Export artifact file was not found.", 404);
   }
 }
 
-function sanitizeFileName(value: string) {
-  return value.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-");
+export async function getMongodumpAvailability() {
+  const path = await detectMongodumpOnPath();
+  return { available: Boolean(path), path };
 }
 
-function toJsonSafeValue(value: unknown): unknown {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
+export async function startImportJob(input: ImportZipInput) {
+  const targetConnection = await getConnectionById(input.targetConnectionId);
+  if (!targetConnection) {
+    throw new AppError("Target connection was not found.", 404);
   }
 
-  if (value instanceof Date) {
-    return value.toISOString();
+  if (targetConnection.organizationId !== input.organizationId) {
+    throw new AppError("Connection must belong to the selected organization.");
   }
 
-  if (Array.isArray(value)) {
-    return value.map((entry) => toJsonSafeValue(entry));
-  }
+  const jobId = randomUUID();
+  await createImportJob({
+    id: jobId,
+    mode: "override",
+    organizationId: input.organizationId,
+    sourceConnectionId: input.targetConnectionId,
+    targetConnectionId: input.targetConnectionId,
+    sourceDatabase: input.targetDatabase,
+    targetDatabase: input.targetDatabase,
+    sourceCollection: "zip import",
+    targetCollection: "zip import",
+    sourceCollections: [],
+    targetCollections: [],
+    artifactFileName: input.filePath,
+  });
 
-  if (value instanceof Uint8Array) {
-    return Buffer.from(value).toString("base64");
-  }
+  void runImportJob({ ...input, jobId, targetConnection });
+  return getCopyJob(jobId);
+}
 
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
+async function runImportJob(
+  input: ImportZipInput & {
+    jobId: string;
+    targetConnection: NonNullable<Awaited<ReturnType<typeof getConnectionById>>>;
+  },
+) {
+  const targetUri = decryptConnectionUrl(input.targetConnection, input.password);
+  const client = await createMongoClient(targetUri);
+  const controller = getOrCreateJobAbortController(input.jobId);
+  let acquiredLock: AcquiredLock | null = null;
 
-  if (typeof value === "object") {
-    const document = value as Document & { _bsontype?: string; toHexString?: () => string };
+  try {
+    acquiredLock = await acquireJobLock({
+      client,
+      connectionId: input.targetConnectionId,
+      database: input.targetDatabase,
+      jobId: input.jobId,
+    });
 
-    if (document._bsontype === "ObjectId" && typeof document.toHexString === "function") {
-      return document.toHexString();
-    }
-
-    if (
-      ["Decimal128", "Long", "Int32", "Double", "Timestamp"].includes(
-        document._bsontype ?? "",
-      ) &&
-      typeof document.toString === "function"
-    ) {
-      return document.toString();
-    }
-
-    if (document._bsontype === "Binary" && "buffer" in document) {
-      return Buffer.from(
-        document.buffer as ArrayBufferLike,
-      ).toString("base64");
-    }
-
-    return Object.fromEntries(
-      Object.entries(document).map(([key, nestedValue]) => [
-        key,
-        toJsonSafeValue(nestedValue),
-      ]),
+    await updateCopyJob(
+      input.jobId,
+      (job) => ({
+        ...job,
+        status: "running",
+        lock: acquiredLock?.info ?? null,
+      }),
+      { forcePersist: true },
     );
-  }
 
-  return String(value);
+    const result = await streamImportZip({
+      filePath: input.filePath,
+      targetClient: client,
+      targetDatabase: input.targetDatabase,
+      jobId: input.jobId,
+      signal: controller.signal,
+      onProgress: async (processed) => {
+        await updateCopyJob(input.jobId, (job) => ({
+          ...job,
+          processedDocuments: processed,
+        }));
+      },
+      log: (level, message) => addCopyJobLog(input.jobId, level, message),
+    });
+
+    await updateCopyJob(
+      input.jobId,
+      (job) => ({
+        ...job,
+        status: "completed",
+        processedDocuments: result.processedDocuments,
+        totalDocuments: result.processedDocuments,
+        sourceCollections: result.collections,
+        targetCollections: result.collections,
+        checkpoints: result.checkpoints,
+        completedAt: new Date().toISOString(),
+        resumable: true,
+      }),
+      { forcePersist: true },
+    );
+    await addCopyJobLog(input.jobId, "info", "Import job completed.");
+  } catch (error) {
+    if (
+      error instanceof CancellationRequestedError ||
+      controller.signal.aborted
+    ) {
+      await updateCopyJob(
+        input.jobId,
+        (job) => ({
+          ...job,
+          status: "cancelled",
+          interruptedReason: "user_cancelled",
+          completedAt: new Date().toISOString(),
+        }),
+        { forcePersist: true },
+      );
+      return;
+    }
+
+    await updateCopyJob(
+      input.jobId,
+      (job) => ({
+        ...job,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+        completedAt: new Date().toISOString(),
+      }),
+      { forcePersist: true },
+    );
+    await addCopyJobLog(
+      input.jobId,
+      "error",
+      error instanceof Error ? error.message : "Unknown error",
+    );
+  } finally {
+    if (acquiredLock) {
+      acquiredLock.stopHeartbeat();
+      await acquiredLock.release().catch(() => undefined);
+    }
+    clearJobAbortController(input.jobId);
+    await client.close();
+  }
 }

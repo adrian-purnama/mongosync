@@ -41,6 +41,7 @@ describe("password management", () => {
             "old-password",
           ),
           locked: false,
+          environment: "local",
           organizationId: "org-1",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),

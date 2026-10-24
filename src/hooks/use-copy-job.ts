@@ -3,7 +3,24 @@
 import { useEffect, useState } from "react";
 
 import { POLL_INTERVAL_MS } from "@/src/server/config/constants";
-import type { CopyJob } from "@/src/types/models";
+import type { CopyJob, CopyJobStatus } from "@/src/types/models";
+
+const TERMINAL_STATUSES = new Set<CopyJobStatus>([
+  "completed",
+  "failed",
+  "cancelled",
+  "reverted",
+  "interrupted",
+]);
+
+/** Keep polling while paused so resume from another tab still updates UI after restart. */
+const ACTIVE_POLL_STATUSES = new Set<CopyJobStatus>([
+  "queued",
+  "running",
+  "paused",
+  "verifying",
+  "swapping",
+]);
 
 export function useCopyJob(jobId: string | null) {
   const [job, setJob] = useState<CopyJob | null>(null);
@@ -31,17 +48,16 @@ export function useCopyJob(jobId: string | null) {
           );
         }
 
+        const nextJob = payload as CopyJob;
+
         if (!cancelled) {
-          setJob(payload as CopyJob);
+          setJob(nextJob);
           setError(null);
         }
 
-        if (
-          !cancelled &&
-          (payload as CopyJob).status !== "completed" &&
-          (payload as CopyJob).status !== "failed" &&
-          (payload as CopyJob).status !== "interrupted"
-        ) {
+        if (!cancelled && ACTIVE_POLL_STATUSES.has(nextJob.status)) {
+          window.setTimeout(poll, POLL_INTERVAL_MS);
+        } else if (!cancelled && !TERMINAL_STATUSES.has(nextJob.status)) {
           window.setTimeout(poll, POLL_INTERVAL_MS);
         }
       } catch (pollError) {

@@ -1,10 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+import { Logo, LogoMark } from "@/src/components/brand/logo";
 import { Modal } from "@/src/components/shared/modal";
+import { Button } from "@/src/components/ui/button";
+import { Alert } from "@/src/components/ui/feedback";
+import { Field, Input } from "@/src/components/ui/field";
+import {
+  IconArrowRight,
+  IconEye,
+  IconEyeOff,
+  IconHelp,
+  IconShield,
+  IconTrash,
+} from "@/src/components/ui/icons";
 
 type UnlockScreenProps = {
   hasUser: boolean;
@@ -14,6 +26,7 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -21,7 +34,7 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
   const [resetConfirmText, setResetConfirmText] = useState("");
 
   const heading = useMemo(
-    () => (hasUser ? "Unlock MongoSync Local" : "Create your master password"),
+    () => (hasUser ? "Welcome back" : "Create your master password"),
     [hasUser],
   );
 
@@ -63,133 +76,160 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
     }
   }
 
+  function closeResetModal() {
+    setShowResetModal(false);
+    setResetConfirmText("");
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-100 px-6 py-12">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-        <div className="mb-4 flex justify-end">
+    <div className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      {/* Brand panel */}
+      <aside className="relative hidden overflow-hidden bg-ink p-10 text-paper lg:flex lg:flex-col">
+        <div className="bg-grid-dark pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_at_30%_40%,black_20%,transparent_70%)]" />
+        <div className="pointer-events-none absolute -left-32 top-1/3 h-96 w-96 rounded-full bg-sync/30 blur-[110px]" />
+
+        <Link href="/" className="relative">
+          <Logo tone="dark" size="md" tagline />
+        </Link>
+
+        <div className="relative my-auto max-w-md">
+          <LogoMark tone="dark" size={88} />
+          <h2 className="mt-8 font-display text-4xl font-semibold leading-[1.08] tracking-[-0.035em]">
+            Your connections never leave this machine.
+          </h2>
+          <p className="mt-4 text-[15px] leading-7 text-fog">
+            The master password derives the key that decrypts your saved MongoDB connection
+            strings. It&apos;s never sent anywhere.
+          </p>
+        </div>
+
+        <div className="relative flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-sync-glow/15 text-sync-glow">
+            <IconShield size={18} />
+          </span>
+          <p className="text-[13px] leading-5 text-fog">
+            AES-256-GCM encryption with a scrypt-derived key, stored in{" "}
+            <span className="font-mono text-paper">%APPDATA%</span>.
+          </p>
+        </div>
+      </aside>
+
+      {/* Form panel */}
+      <main className="relative flex flex-col bg-paper px-6 py-8 sm:px-10">
+        <div className="flex items-center justify-between">
+          <Link href="/" className="lg:invisible">
+            <Logo size="sm" />
+          </Link>
           <Link
             href="/"
-            aria-label="How this app works"
-            title="How this app works"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-900 bg-zinc-950 text-sm font-semibold text-white transition hover:bg-zinc-800"
+            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] text-muted transition hover:bg-ink/5 hover:text-ink"
           >
-            ?
+            <IconHelp size={15} />
+            How it works
           </Link>
         </div>
-        <div className="mb-6 flex flex-col items-start gap-3">
-        <Image
-              src="/assets/logo only.png"
-              alt=""
-              width={200}
-              height={200}
-              className="w-30 object-contain"
-              aria-hidden="true"
-            />
-          <Image
-            src="/assets/name only.png"
-            alt="MongoSync Local"
-            width={260}
-            height={52}
-            className="h-auto w-20"
-            priority
-          />
-          <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-            Local-only access
-          </div>
-        </div>
-        <h1 className="mb-3 text-3xl font-semibold text-zinc-950">{heading}</h1>
-        <p className="mb-6 text-sm leading-6 text-zinc-600">
-          The master password unlocks encrypted MongoDB connection strings stored on
-          this machine.
-        </p>
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <label className="grid gap-2 text-sm font-medium text-zinc-700">
-            Master password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="rounded-md border border-zinc-300 px-3 py-2"
-              required
-            />
-          </label>
+        <div className="mx-auto my-auto w-full max-w-sm py-12">
+          <p className="font-display text-[11px] font-medium uppercase tracking-[0.2em] text-sync">
+            {hasUser ? "Local-only access" : "First-time setup"}
+          </p>
+          <h1 className="mt-3 font-display text-[32px] font-semibold leading-tight tracking-[-0.03em] text-ink">
+            {heading}
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            {hasUser
+              ? "Enter your master password to unlock your encrypted connections."
+              : "This password encrypts your connection strings. There's no recovery if you forget it, so pick one you'll remember."}
+          </p>
 
-          {!hasUser ? (
-            <label className="grid gap-2 text-sm font-medium text-zinc-700">
-              Confirm password
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                className="rounded-md border border-zinc-300 px-3 py-2"
-                required
-              />
-            </label>
-          ) : null}
+          <form className="mt-8 grid gap-4" onSubmit={handleSubmit}>
+            <Field label="Master password">
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="h-11 pr-11"
+                  autoFocus
+                  autoComplete={hasUser ? "current-password" : "new-password"}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute right-1.5 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-subtle transition hover:bg-ink/5 hover:text-ink"
+                >
+                  {showPassword ? <IconEyeOff /> : <IconEye />}
+                </button>
+              </div>
+            </Field>
 
-          {error ? (
-            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </p>
-          ) : null}
+            {!hasUser ? (
+              <Field label="Confirm password">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  className="h-11"
+                  autoComplete="new-password"
+                  required
+                />
+              </Field>
+            ) : null}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full rounded-md bg-zinc-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-zinc-700 disabled:opacity-50"
-          >
-            {isSubmitting
-              ? "Working..."
-              : hasUser
-                ? "Unlock"
-                : "Create password"}
-          </button>
-        </form>
+            {error ? <Alert tone="danger">{error}</Alert> : null}
 
-        {hasUser ? (
-          <div className="mt-6 border-t border-zinc-200 pt-4">
-            <button
-              type="button"
-              onClick={() => setShowResetModal(true)}
-              className="w-full rounded-md border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={isSubmitting}
+              className="mt-2 w-full"
             >
-              Reset all data
-            </button>
-          </div>
-        ) : null}
-      </div>
+              {isSubmitting ? "Working..." : hasUser ? "Unlock" : "Create password"}
+              {isSubmitting ? null : <IconArrowRight />}
+            </Button>
+          </form>
+
+          {hasUser ? (
+            <div className="mt-10 flex items-center justify-between gap-4 border-t border-line pt-5">
+              <p className="text-[13px] text-muted">Forgot your password?</p>
+              <Button
+                variant="danger-soft"
+                size="sm"
+                onClick={() => setShowResetModal(true)}
+                icon={<IconTrash size={14} />}
+              >
+                Reset all data
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </main>
 
       <Modal
         title="Reset all local data"
-        description="This will delete your master password, organizations, connections, and persisted jobs. Type RESET to continue."
+        description="This deletes your master password, organizations, connections, and persisted jobs. It can't be undone. Type RESET to continue."
         isOpen={showResetModal}
-        onClose={() => {
-          setShowResetModal(false);
-          setResetConfirmText("");
-        }}
+        onClose={closeResetModal}
+        icon={<IconTrash size={18} />}
+        tone="danger"
       >
-        <div className="grid gap-3">
-          <input
+        <div className="grid gap-4">
+          <Input
             value={resetConfirmText}
             onChange={(event) => setResetConfirmText(event.target.value)}
             placeholder="Type RESET"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+            className="font-mono"
+            autoFocus
           />
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowResetModal(false);
-                setResetConfirmText("");
-              }}
-              className="rounded-md border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={isResetting || resetConfirmText !== "RESET"}
+            <Button onClick={closeResetModal}>Cancel</Button>
+            <Button
+              variant="danger"
+              loading={isResetting}
+              disabled={resetConfirmText !== "RESET"}
               onClick={async () => {
                 setError("");
                 setIsResetting(true);
@@ -219,10 +259,9 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
                   setIsResetting(false);
                 }
               }}
-              className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               {isResetting ? "Resetting..." : "Delete all data"}
-            </button>
+            </Button>
           </div>
         </div>
       </Modal>

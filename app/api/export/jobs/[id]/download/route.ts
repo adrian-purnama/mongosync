@@ -1,6 +1,6 @@
 import { apiError } from "@/src/server/api/response";
 import { requireMasterPassword } from "@/src/server/auth/auth-guard";
-import { loadPersistedJobArtifact } from "@/src/server/jobs/job-store";
+import { loadExportArtifact } from "@/src/server/mongo/export-service";
 import { getCopyJob } from "@/src/server/mongo/copy-job-store";
 import { AppError } from "@/src/server/utils/errors";
 
@@ -28,13 +28,13 @@ export async function GET(_request: Request, context: RouteContext) {
       throw new AppError("Export artifact is not ready yet.", 409);
     }
 
-    const artifact = await loadPersistedJobArtifact(id);
+    const artifact = await loadExportArtifact(id);
 
-    return new Response(artifact, {
+    return new Response(new Uint8Array(artifact.content), {
       status: 200,
       headers: {
-        "Content-Type": job.artifactContentType ?? "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${job.artifactFileName ?? `${job.id}.bin`}"`,
+        "Content-Type": artifact.contentType,
+        "Content-Disposition": `attachment; filename="${artifact.fileName}"`,
         "Cache-Control": "no-store",
       },
     });

@@ -40,7 +40,8 @@ export async function persistJobSnapshot(job: CopyJob) {
         job.status === "completed" ||
         job.status === "failed" ||
         job.status === "interrupted" ||
-        job.status === "cancelled"
+        job.status === "cancelled" ||
+        job.status === "reverted"
           ? job.retentionExpiresAt ?? new Date(Date.now() + JOB_RETENTION_MS).toISOString()
           : null,
     },
@@ -126,13 +127,28 @@ export function createJobLog(
 }
 
 function normalizeLegacyJob(job: CopyJob) {
+  const status =
+    job.status === "interrupted"
+      ? ("paused" as const)
+      : job.status;
+
   return {
     ...job,
     kind: job.kind ?? "copy",
+    status,
     targetConnectionId: job.targetConnectionId ?? null,
     targetDatabase: job.targetDatabase ?? null,
     targetCollection: job.targetCollection ?? null,
     targetCollections: job.targetCollections ?? null,
+    processedBytes: job.processedBytes ?? 0,
+    resumable: job.resumable ?? Boolean(job.checkpoints?.length),
+    checkpoints: job.checkpoints ?? [],
+    swapSteps: job.swapSteps ?? [],
+    journalCollection: job.journalCollection ?? null,
+    lock: job.lock ?? null,
+    backupBytesEstimate: job.backupBytesEstimate ?? null,
+    filter: job.filter ?? null,
+    limit: job.limit ?? null,
     artifactFileName: job.artifactFileName ?? null,
     artifactStoredAt: job.artifactStoredAt ?? null,
     artifactContentType: job.artifactContentType ?? null,

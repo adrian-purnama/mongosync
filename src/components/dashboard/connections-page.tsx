@@ -13,6 +13,7 @@ export function ConnectionsPage() {
   const [name, setName] = useState("");
   const [mongoUrl, setMongoUrl] = useState("");
   const [locked, setLocked] = useState(false);
+  const [environment, setEnvironment] = useState<"prod" | "staging" | "dev" | "local">("local");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -82,6 +83,7 @@ export function ConnectionsPage() {
           name,
           mongoUrl,
           locked,
+          environment,
           organizationId: selectedOrganizationId,
         }),
       });
@@ -97,6 +99,7 @@ export function ConnectionsPage() {
       setName("");
       setMongoUrl("");
       setLocked(false);
+      setEnvironment("local");
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to create connection.");
     } finally {
@@ -125,6 +128,7 @@ export function ConnectionsPage() {
       name: string;
       mongoUrl?: string;
       locked: boolean;
+      environment: "prod" | "staging" | "dev" | "local";
       organizationId: string;
     },
   ) {
@@ -172,6 +176,23 @@ export function ConnectionsPage() {
               className="rounded-md border border-zinc-300 px-3 py-2"
               required
             />
+            <label className="flex items-center gap-2 text-sm text-zinc-700">
+              Environment
+              <select
+                value={environment}
+                onChange={(event) =>
+                  setEnvironment(
+                    event.target.value as "prod" | "staging" | "dev" | "local",
+                  )
+                }
+                className="rounded-md border border-zinc-300 px-2 py-1"
+              >
+                <option value="local">local</option>
+                <option value="dev">dev</option>
+                <option value="staging">staging</option>
+                <option value="prod">prod</option>
+              </select>
+            </label>
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
                 type="checkbox"

@@ -28,7 +28,10 @@ export async function getAppData() {
     ...DEFAULT_APP_DATA,
     ...parsed,
     organizations: parsed.organizations ?? [],
-    connections: parsed.connections ?? [],
+    connections: (parsed.connections ?? []).map((connection) => ({
+      ...connection,
+      environment: connection.environment ?? "local",
+    })),
     user: parsed.user ?? null,
   } satisfies AppData;
 }

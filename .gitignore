@@ -42,3 +42,10 @@ next-env.d.ts
 
 #dist electron
 /dist-electron
+
+app
+electron
+.tmp
+.next
+.fallow
+scripts
