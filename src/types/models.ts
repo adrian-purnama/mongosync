@@ -1,21 +1,25 @@
 export type AppSchemaVersion = 1;
 
+export type EncryptedSecret = {
+  cipherText: string;
+  iv: string;
+  salt: string;
+  authTag: string;
+};
+
 export type UserRecord = {
   masterPasswordHash: string;
   createdAt: string;
+  recoveryQuestion?: string;
+  recoveryAnswerHash?: string;
+  wrappedMasterPassword?: EncryptedSecret;
+  wrappedRecoveryAnswer?: EncryptedSecret;
 };
 
 export type Organization = {
   id: string;
   name: string;
   createdAt: string;
-};
-
-export type EncryptedSecret = {
-  cipherText: string;
-  iv: string;
-  salt: string;
-  authTag: string;
 };
 
 export type ConnectionEnvironment = "prod" | "staging" | "dev" | "local";

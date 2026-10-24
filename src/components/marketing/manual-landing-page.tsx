@@ -110,10 +110,10 @@ export function ManualLandingPage() {
 
         <section className="relative z-10 mx-auto grid w-full max-w-6xl items-center gap-14 px-6 pb-24 pt-14 lg:grid-cols-[1.05fr_0.95fr] lg:pt-20">
           <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 font-display text-[11px] uppercase tracking-[0.2em] text-sync-mist">
+            {/* <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 font-display text-[11px] uppercase tracking-[0.2em] text-sync-mist">
               <span className="size-1.5 rounded-full bg-sync-glow" />
               Local-first · Windows desktop
-            </p>
+            </p> */}
             <h1 className="mt-6 font-display text-[44px] font-semibold leading-[1.02] tracking-[-0.035em] text-paper sm:text-[56px]">
               Replicate MongoDB data.
               <br />
@@ -270,6 +270,10 @@ export function ManualLandingPage() {
                   <Bullet>
                     Changing the password from the workspace re-encrypts every saved connection.
                   </Bullet>
+                  <Bullet>
+                    An optional recovery question can reset the master password without deleting
+                    connections.
+                  </Bullet>
                 </ul>
               </ManualCard>
               <ManualCard icon={<IconTerminal size={18} />} title="Copy processing">
@@ -304,9 +308,10 @@ export function ManualLandingPage() {
                 </h3>
               </div>
               <p className="mt-4 text-sm leading-6 text-red-900/80">
-                There is no recovery. Saved connection strings are encrypted with a key derived
-                from your master password, so without it they can&apos;t be decrypted. You&apos;ll
-                need to reset all local data and set up again.
+                If you set a recovery question, you can answer it on the unlock screen to choose a
+                new master password without deleting saved connections. Without recovery, the only
+                option is to reset all local data and set up again — encrypted connection strings
+                can&apos;t be decrypted without the password or a correct recovery answer.
               </p>
             </div>
           </div>

@@ -4,7 +4,13 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { changeMasterPassword, resetAllLocalData } from "@/src/server/auth/password-management-service";
+import {
+  changeMasterPassword,
+  clearRecovery,
+  recoverMasterPassword,
+  resetAllLocalData,
+  setRecovery,
+} from "@/src/server/auth/password-management-service";
 import { hashMasterPassword } from "@/src/server/auth/password-service";
 import { resetCopyJobRuntimeForTests, createCopyJob } from "@/src/server/mongo/copy-job-store";
 import { decryptSecret, encryptSecret } from "@/src/server/security/encryption-service";
@@ -100,5 +106,73 @@ describe("password management", () => {
     expect(data.organizations).toEqual([]);
     expect(data.connections).toEqual([]);
     expect(jobs).toEqual([]);
+  });
+
+  it("recovers with normalized answer variants and keeps connections", async () => {
+    await setRecovery("old-password", "What city?", "My Answer");
+
+    await recoverMasterPassword(" MY  ANSWER ", "recovered-password");
+
+    const data = await getAppData();
+    const connection = data.connections[0];
+
+    expect(data.organizations).toHaveLength(1);
+    expect(data.connections).toHaveLength(1);
+    expect(data.user?.recoveryQuestion).toBe("What city?");
+    expect(
+      decryptSecret(connection!.encryptedMongoUrl, "recovered-password"),
+    ).toBe("mongodb://localhost:27017/source");
+    expect(() =>
+      decryptSecret(connection!.encryptedMongoUrl, "old-password"),
+    ).toThrow();
+  });
+
+  it("accepts myanswer as equivalent to My Answer after normalization", async () => {
+    await setRecovery("old-password", "What city?", "My Answer");
+    await recoverMasterPassword("myanswer", "another-password");
+
+    const data = await getAppData();
+    expect(
+      decryptSecret(data.connections[0]!.encryptedMongoUrl, "another-password"),
+    ).toBe("mongodb://localhost:27017/source");
+  });
+
+  it("rejects incorrect recovery answer without changing data", async () => {
+    await setRecovery("old-password", "What city?", "My Answer");
+
+    await expect(
+      recoverMasterPassword("wrong answer", "new-password"),
+    ).rejects.toThrow("Incorrect recovery answer.");
+
+    const data = await getAppData();
+    expect(
+      decryptSecret(data.connections[0]!.encryptedMongoUrl, "old-password"),
+    ).toBe("mongodb://localhost:27017/source");
+  });
+
+  it("keeps recovery working after a password change", async () => {
+    await setRecovery("old-password", "What city?", "My Answer");
+    await changeMasterPassword("old-password", "rotated-password");
+
+    await recoverMasterPassword("myanswer", "after-rotate");
+
+    const data = await getAppData();
+    expect(
+      decryptSecret(data.connections[0]!.encryptedMongoUrl, "after-rotate"),
+    ).toBe("mongodb://localhost:27017/source");
+    expect(data.organizations).toHaveLength(1);
+  });
+
+  it("clears recovery so recover is no longer available", async () => {
+    await setRecovery("old-password", "What city?", "My Answer");
+    await clearRecovery("old-password");
+
+    await expect(
+      recoverMasterPassword("myanswer", "new-password"),
+    ).rejects.toThrow("Recovery is not configured.");
+
+    const data = await getAppData();
+    expect(data.user?.recoveryQuestion).toBeUndefined();
+    expect(data.user?.wrappedMasterPassword).toBeUndefined();
   });
 });

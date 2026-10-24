@@ -80,7 +80,7 @@ function SearchBox({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={`Search ${label.toLowerCase()}`}
-        className="h-10 w-full bg-transparent text-sm text-ink outline-none placeholder:text-subtle"
+        className="h-10 w-full bg-transparent text-sm text-ink outline-none focus-visible:!outline-none placeholder:text-subtle"
       />
     </div>
   );

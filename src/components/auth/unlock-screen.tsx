@@ -16,13 +16,20 @@ import {
   IconHelp,
   IconShield,
   IconTrash,
+  IconUnlock,
 } from "@/src/components/ui/icons";
 
 type UnlockScreenProps = {
   hasUser: boolean;
+  hasRecovery: boolean;
+  recoveryQuestion: string | null;
 };
 
-export function UnlockScreen({ hasUser }: UnlockScreenProps) {
+export function UnlockScreen({
+  hasUser,
+  hasRecovery,
+  recoveryQuestion,
+}: UnlockScreenProps) {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -30,8 +37,18 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showRecoverModal, setShowRecoverModal] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState("");
+  const [addRecovery, setAddRecovery] = useState(false);
+  const [recoveryQuestionInput, setRecoveryQuestionInput] = useState("");
+  const [recoveryAnswer, setRecoveryAnswer] = useState("");
+  const [confirmRecoveryAnswer, setConfirmRecoveryAnswer] = useState("");
+  const [recoverAnswer, setRecoverAnswer] = useState("");
+  const [recoverPassword, setRecoverPassword] = useState("");
+  const [confirmRecoverPassword, setConfirmRecoverPassword] = useState("");
+  const [recoverError, setRecoverError] = useState("");
 
   const heading = useMemo(
     () => (hasUser ? "Welcome back" : "Create your master password"),
@@ -48,13 +65,31 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
         throw new Error("Passwords do not match.");
       }
 
+      if (!hasUser && addRecovery) {
+        if (recoveryAnswer !== confirmRecoveryAnswer) {
+          throw new Error("Recovery answers do not match.");
+        }
+      }
+
       const endpoint = hasUser ? "/api/auth/unlock" : "/api/auth/setup";
+      const body = hasUser
+        ? { password }
+        : {
+            password,
+            ...(addRecovery
+              ? {
+                  recoveryQuestion: recoveryQuestionInput,
+                  recoveryAnswer,
+                }
+              : {}),
+          };
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(body),
       });
 
       const payload = (await response.json()) as { error?: string };
@@ -79,6 +114,14 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
   function closeResetModal() {
     setShowResetModal(false);
     setResetConfirmText("");
+  }
+
+  function closeRecoverModal() {
+    setShowRecoverModal(false);
+    setRecoverAnswer("");
+    setRecoverPassword("");
+    setConfirmRecoverPassword("");
+    setRecoverError("");
   }
 
   return (
@@ -139,7 +182,7 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
           <p className="mt-2 text-sm leading-6 text-muted">
             {hasUser
               ? "Enter your master password to unlock your encrypted connections."
-              : "This password encrypts your connection strings. There's no recovery if you forget it, so pick one you'll remember."}
+              : "This password encrypts your connection strings. You can optionally add a recovery question to reset it later without deleting data."}
           </p>
 
           <form className="mt-8 grid gap-4" onSubmit={handleSubmit}>
@@ -178,6 +221,61 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
               </Field>
             ) : null}
 
+            {!hasUser ? (
+              <div className="rounded-xl border border-line bg-surface/60 p-4">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={addRecovery}
+                    onChange={(event) => setAddRecovery(event.target.checked)}
+                    className="mt-1 size-4 accent-[var(--sync)]"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-ink">
+                      Add recovery question
+                    </span>
+                    <span className="mt-0.5 block text-[13px] leading-5 text-muted">
+                      Lets you reset the master password later without deleting saved
+                      connections. Answers are normalized (lowercase, no spaces).
+                    </span>
+                  </span>
+                </label>
+
+                {addRecovery ? (
+                  <div className="mt-4 grid gap-3">
+                    <Field label="Recovery question">
+                      <Input
+                        value={recoveryQuestionInput}
+                        onChange={(event) =>
+                          setRecoveryQuestionInput(event.target.value)
+                        }
+                        placeholder="e.g. What city were you born in?"
+                        required
+                      />
+                    </Field>
+                    <Field label="Recovery answer">
+                      <Input
+                        value={recoveryAnswer}
+                        onChange={(event) => setRecoveryAnswer(event.target.value)}
+                        autoComplete="off"
+                        required
+                      />
+                    </Field>
+                    <Field label="Confirm answer">
+                      <Input
+                        value={confirmRecoveryAnswer}
+                        onChange={(event) =>
+                          setConfirmRecoveryAnswer(event.target.value)
+                        }
+                        autoComplete="off"
+                        required
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {error ? <Alert tone="danger">{error}</Alert> : null}
 
             <Button
@@ -193,20 +291,125 @@ export function UnlockScreen({ hasUser }: UnlockScreenProps) {
           </form>
 
           {hasUser ? (
-            <div className="mt-10 flex items-center justify-between gap-4 border-t border-line pt-5">
+            <div className="mt-10 grid gap-3 border-t border-line pt-5">
               <p className="text-[13px] text-muted">Forgot your password?</p>
-              <Button
-                variant="danger-soft"
-                size="sm"
-                onClick={() => setShowResetModal(true)}
-                icon={<IconTrash size={14} />}
-              >
-                Reset all data
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {hasRecovery ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowRecoverModal(true)}
+                    icon={<IconUnlock size={14} />}
+                  >
+                    Recover with security question
+                  </Button>
+                ) : null}
+                <Button
+                  variant="danger-soft"
+                  size="sm"
+                  onClick={() => setShowResetModal(true)}
+                  icon={<IconTrash size={14} />}
+                >
+                  Reset all data
+                </Button>
+              </div>
             </div>
           ) : null}
         </div>
       </main>
+
+      <Modal
+        title="Recover master password"
+        description="Answer your recovery question, then choose a new master password. Saved connections are kept and re-encrypted."
+        isOpen={showRecoverModal}
+        onClose={closeRecoverModal}
+        icon={<IconUnlock size={18} />}
+      >
+        <form
+          className="grid gap-4"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setRecoverError("");
+
+            if (recoverPassword !== confirmRecoverPassword) {
+              setRecoverError("New passwords do not match.");
+              return;
+            }
+
+            setIsRecovering(true);
+
+            try {
+              const response = await fetch("/api/auth/recover", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  answer: recoverAnswer,
+                  password: recoverPassword,
+                }),
+              });
+              const payload = (await response.json()) as { error?: string };
+
+              if (!response.ok) {
+                throw new Error(payload.error ?? "Recovery failed.");
+              }
+
+              closeRecoverModal();
+              router.push("/workspace");
+              router.refresh();
+            } catch (submitRecoverError) {
+              setRecoverError(
+                submitRecoverError instanceof Error
+                  ? submitRecoverError.message
+                  : "Recovery failed.",
+              );
+            } finally {
+              setIsRecovering(false);
+            }
+          }}
+        >
+          <Field label="Your question">
+            <p className="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-ink">
+              {recoveryQuestion}
+            </p>
+          </Field>
+          <Field label="Your answer">
+            <Input
+              value={recoverAnswer}
+              onChange={(event) => setRecoverAnswer(event.target.value)}
+              autoComplete="off"
+              autoFocus
+              required
+            />
+          </Field>
+          <Field label="New master password">
+            <Input
+              type="password"
+              value={recoverPassword}
+              onChange={(event) => setRecoverPassword(event.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </Field>
+          <Field label="Confirm new password">
+            <Input
+              type="password"
+              value={confirmRecoverPassword}
+              onChange={(event) => setConfirmRecoverPassword(event.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </Field>
+          {recoverError ? <Alert tone="danger">{recoverError}</Alert> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" onClick={closeRecoverModal}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={isRecovering}>
+              {isRecovering ? "Recovering..." : "Reset password"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal
         title="Reset all local data"

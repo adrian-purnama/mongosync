@@ -10,7 +10,8 @@
     "start": "next start",
     "electron:dev": "electron .",
     "electron:start": "electron .",
-    "dist:win": "npm run build && electron-builder --win portable --config.win.signAndEditExecutable=false",
+    "dist:win": "npm run build && electron-builder --win portable",
+    "dist:win:nsis": "npm run build && electron-builder --win nsis",
     "lint": "eslint",
     "test": "vitest run",
     "bench:copy": "tsx scripts/bench-copy.ts"
@@ -45,7 +46,7 @@
   },
   "build": {
     "appId": "com.mongosync.local",
-    "productName": "MongoSync Local",
+    "productName": "MongoSync",
     "directories": {
       "output": "dist-electron"
     },
@@ -63,16 +64,14 @@
       "target": [
         "portable"
       ],
-      "artifactName": "MongoSync-Local-${version}.${ext}",
-      "signAndEditExecutable": false,
-      "icon": "electron/assets/icon.ico"
+      "icon": "electron/assets/icon.ico",
+      "artifactName": "MongoSync-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    },
-    "icon": "electron/assets/icon.png",
-    "afterPack": "./scripts/after-pack.cjs"
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "MongoSync"
+    }
   },
   "optionalDependencies": {
     "@mongodb-js/zstd": "^7.0.0",

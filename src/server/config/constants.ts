@@ -1,4 +1,4 @@
-export const APP_NAME = "MongoSync Local";
+export const APP_NAME = "MongoSync";
 export const APP_DATA_DIR_NAME = "MongoSyncLocal";
 export const APP_DATA_FILE_NAME = "config.json";
 export const SESSION_SECRET_FILE_NAME = "session-secret.key";

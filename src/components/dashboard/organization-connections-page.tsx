@@ -35,11 +35,21 @@ export function OrganizationConnectionsPage() {
   const [isSavingOrganization, setIsSavingOrganization] = useState(false);
   const [isRenamingOrganization, setIsRenamingOrganization] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isSavingRecovery, setIsSavingRecovery] = useState(false);
+  const [isClearingRecovery, setIsClearingRecovery] = useState(false);
   const [showRenameOrganizationModal, setShowRenameOrganizationModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [hasRecovery, setHasRecovery] = useState(false);
+  const [existingRecoveryQuestion, setExistingRecoveryQuestion] = useState<string | null>(
+    null,
+  );
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [recoveryQuestion, setRecoveryQuestion] = useState("");
+  const [recoveryAnswer, setRecoveryAnswer] = useState("");
+  const [confirmRecoveryAnswer, setConfirmRecoveryAnswer] = useState("");
   const [renameOrganizationName, setRenameOrganizationName] = useState("");
   const organizationIds = useMemo(
     () => organizations.map((organization) => organization.id),
@@ -73,10 +83,26 @@ export function OrganizationConnectionsPage() {
     setConnections(payload as Connection[]);
   }
 
+  async function loadRecovery() {
+    const response = await fetch("/api/auth/recovery", { cache: "no-store" });
+    const payload = (await response.json()) as {
+      hasRecovery?: boolean;
+      recoveryQuestion?: string | null;
+      error?: string;
+    };
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Failed to load recovery settings.");
+    }
+
+    setHasRecovery(Boolean(payload.hasRecovery));
+    setExistingRecoveryQuestion(payload.recoveryQuestion ?? null);
+  }
+
   useEffect(() => {
     void (async () => {
       try {
-        await loadOrganizations();
+        await Promise.all([loadOrganizations(), loadRecovery()]);
         setIsLoading(false);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Failed to load data.");
@@ -302,6 +328,85 @@ export function OrganizationConnectionsPage() {
     setConfirmNewPassword("");
   }
 
+  function closeRecoveryModal() {
+    setShowRecoveryModal(false);
+    setRecoveryQuestion("");
+    setRecoveryAnswer("");
+    setConfirmRecoveryAnswer("");
+  }
+
+  function openRecoveryModal() {
+    setError("");
+    setRecoveryQuestion(existingRecoveryQuestion ?? "");
+    setRecoveryAnswer("");
+    setConfirmRecoveryAnswer("");
+    setShowRecoveryModal(true);
+  }
+
+  async function handleSaveRecovery(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+
+    if (recoveryAnswer !== confirmRecoveryAnswer) {
+      setError("Recovery answers do not match.");
+      return;
+    }
+
+    setIsSavingRecovery(true);
+
+    try {
+      const response = await fetch("/api/auth/recovery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: recoveryQuestion,
+          answer: recoveryAnswer,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to save recovery.");
+      }
+
+      await loadRecovery();
+      closeRecoveryModal();
+    } catch (recoveryError) {
+      setError(
+        recoveryError instanceof Error
+          ? recoveryError.message
+          : "Failed to save recovery.",
+      );
+    } finally {
+      setIsSavingRecovery(false);
+    }
+  }
+
+  async function handleClearRecovery() {
+    setError("");
+    setIsClearingRecovery(true);
+
+    try {
+      const response = await fetch("/api/auth/recovery", { method: "DELETE" });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to remove recovery.");
+      }
+
+      await loadRecovery();
+      closeRecoveryModal();
+    } catch (recoveryError) {
+      setError(
+        recoveryError instanceof Error
+          ? recoveryError.message
+          : "Failed to remove recovery.",
+      );
+    } finally {
+      setIsClearingRecovery(false);
+    }
+  }
+
   function closeRenameModal() {
     setShowRenameOrganizationModal(false);
     setRenameOrganizationName("");
@@ -314,9 +419,14 @@ export function OrganizationConnectionsPage() {
         title={selectedOrganization?.name ?? "Your workspace"}
         description="Group MongoDB connections by organization. Every connection string is verified before saving and encrypted on this machine."
         actions={
-          <Button icon={<IconKey size={15} />} onClick={() => setShowChangePasswordModal(true)}>
-            Change password
-          </Button>
+          <>
+            <Button icon={<IconShield size={15} />} onClick={openRecoveryModal}>
+              {hasRecovery ? "Recovery" : "Add recovery"}
+            </Button>
+            <Button icon={<IconKey size={15} />} onClick={() => setShowChangePasswordModal(true)}>
+              Change password
+            </Button>
+          </>
         }
       />
 
@@ -563,6 +673,65 @@ export function OrganizationConnectionsPage() {
             <Button type="submit" variant="primary" loading={isChangingPassword}>
               {isChangingPassword ? "Updating..." : "Update password"}
             </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        title={hasRecovery ? "Update recovery" : "Add recovery"}
+        description="Set a question and answer you can use to reset the master password without deleting connections. Answers are normalized (lowercase, no spaces)."
+        isOpen={showRecoveryModal}
+        onClose={closeRecoveryModal}
+        icon={<IconShield size={17} />}
+      >
+        <form className="grid gap-4" onSubmit={handleSaveRecovery}>
+          <Field label="Recovery question">
+            <Input
+              value={recoveryQuestion}
+              onChange={(event) => setRecoveryQuestion(event.target.value)}
+              placeholder="e.g. What city were you born in?"
+              autoFocus
+              required
+            />
+          </Field>
+          <Field label="Recovery answer">
+            <Input
+              value={recoveryAnswer}
+              onChange={(event) => setRecoveryAnswer(event.target.value)}
+              autoComplete="off"
+              required
+            />
+          </Field>
+          <Field label="Confirm answer">
+            <Input
+              value={confirmRecoveryAnswer}
+              onChange={(event) => setConfirmRecoveryAnswer(event.target.value)}
+              autoComplete="off"
+              required
+            />
+          </Field>
+          {error ? <Alert tone="danger">{error}</Alert> : null}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            {hasRecovery ? (
+              <Button
+                type="button"
+                variant="danger-soft"
+                loading={isClearingRecovery}
+                onClick={() => void handleClearRecovery()}
+              >
+                {isClearingRecovery ? "Removing..." : "Remove recovery"}
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <Button type="button" onClick={closeRecoveryModal}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" loading={isSavingRecovery}>
+                {isSavingRecovery ? "Saving..." : "Save recovery"}
+              </Button>
+            </div>
           </div>
         </form>
       </Modal>

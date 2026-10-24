@@ -574,7 +574,7 @@ export function CopyToolPage() {
             value={action}
             onChange={setAction}
             options={[
-              { value: "copy", label: "Copy to DB", icon: <IconRefresh size={14} /> },
+              { value: "copy", label: "Copy DB", icon: <IconRefresh size={14} /> },
               { value: "export", label: "Export ZIP", icon: <IconArchive size={14} /> },
             ]}
           />
